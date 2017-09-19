@@ -687,6 +687,10 @@ mrvl_dev_stop(struct rte_eth_dev *dev)
 	mrvl_dev_set_link_down(dev);
 	mrvl_flush_rx_queues(dev);
 	mrvl_flush_tx_shadow_queues(dev);
+	if (priv->cls_tbl) {
+		pp2_cls_tbl_deinit(priv->cls_tbl);
+		priv->cls_tbl = NULL;
+	}
 	if (priv->qos_tbl) {
 		pp2_cls_qos_tbl_deinit(priv->qos_tbl);
 		priv->qos_tbl = NULL;
@@ -812,6 +816,9 @@ mrvl_promiscuous_enable(struct rte_eth_dev *dev)
 	if (!priv->ppio)
 		return;
 
+	if (priv->isolated)
+		return;
+
 	ret = pp2_ppio_set_promisc(priv->ppio, 1);
 	if (ret)
 		RTE_LOG(ERR, PMD, "Failed to enable promiscuous mode\n");
@@ -830,6 +837,9 @@ mrvl_allmulticast_enable(struct rte_eth_dev *dev)
 	int ret;
 
 	if (!priv->ppio)
+		return;
+
+	if (priv->isolated)
 		return;
 
 	ret = pp2_ppio_set_mc_promisc(priv->ppio, 1);
@@ -895,6 +905,9 @@ mrvl_mac_addr_remove(struct rte_eth_dev *dev, uint32_t index)
 	if (!priv->ppio)
 		return;
 
+	if (priv->isolated)
+		return;
+
 	ret = pp2_ppio_remove_mac_addr(priv->ppio,
 				       dev->data->mac_addrs[index].addr_bytes);
 	if (ret) {
@@ -926,6 +939,9 @@ mrvl_mac_addr_add(struct rte_eth_dev *dev, struct ether_addr *mac_addr,
 	struct mrvl_priv *priv = dev->data->dev_private;
 	char buf[ETHER_ADDR_FMT_SIZE];
 	int ret;
+
+	if (priv->isolated)
+		return -ENOTSUP;
 
 	if (index == 0)
 		/* For setting index 0, mrvl_mac_addr_set() should be used.*/
@@ -972,6 +988,9 @@ mrvl_mac_addr_set(struct rte_eth_dev *dev, struct ether_addr *mac_addr)
 	int ret;
 
 	if (!priv->ppio)
+		return;
+
+	if (priv->isolated)
 		return;
 
 	ret = pp2_ppio_set_mac_addr(priv->ppio, mac_addr->addr_bytes);
@@ -1254,6 +1273,9 @@ mrvl_vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
 
 	if (!priv->ppio)
 		return -EPERM;
+
+	if (priv->isolated)
+		return -ENOTSUP;
 
 	return on ? pp2_ppio_add_vlan(priv->ppio, vlan_id) :
 		    pp2_ppio_remove_vlan(priv->ppio, vlan_id);
@@ -1608,6 +1630,9 @@ mrvl_rss_hash_update(struct rte_eth_dev *dev,
 {
 	struct mrvl_priv *priv = dev->data->dev_private;
 
+	if (priv->isolated)
+		return -ENOTSUP;
+
 	return mrvl_configure_rss(priv, rss_conf);
 }
 
@@ -1644,6 +1669,39 @@ mrvl_rss_hash_conf_get(struct rte_eth_dev *dev,
 	return 0;
 }
 
+/**
+ * DPDK callback to get rte_flow callbacks.
+ *
+ * @param dev
+ *   Pointer to the device structure.
+ * @param filer_type
+ *   Flow filter type.
+ * @param filter_op
+ *   Flow filter operation.
+ * @param arg
+ *   Pointer to pass the flow ops.
+ *
+ * @return
+ *   0 on success, negative error value otherwise.
+ */
+static int
+mrvl_eth_filter_ctrl(struct rte_eth_dev *dev __rte_unused,
+		     enum rte_filter_type filter_type,
+		     enum rte_filter_op filter_op, void *arg)
+{
+	switch (filter_type) {
+	case RTE_ETH_FILTER_GENERIC:
+		if (filter_op != RTE_ETH_FILTER_GET)
+			return -EINVAL;
+		*(const void **)arg = &mrvl_flow_ops;
+		return 0;
+	default:
+		RTE_LOG(WARNING, PMD, "Filter type (%d) not supported",
+				filter_type);
+		return -EINVAL;
+	}
+}
+
 static const struct eth_dev_ops mrvl_ops = {
 	.dev_configure = mrvl_dev_configure,
 	.dev_start = mrvl_dev_start,
@@ -1673,6 +1731,7 @@ static const struct eth_dev_ops mrvl_ops = {
 	.tx_queue_release = mrvl_tx_queue_release,
 	.rss_hash_update = mrvl_rss_hash_update,
 	.rss_hash_conf_get = mrvl_rss_hash_conf_get,
+	.filter_ctrl = mrvl_eth_filter_ctrl
 };
 
 /**
