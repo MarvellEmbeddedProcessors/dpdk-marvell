@@ -86,11 +86,6 @@
 
 #define MRVL_ARP_LENGTH 28
 
-#define MRVL_COOKIE_ADDR_INVALID ~0ULL
-
-#define MRVL_COOKIE_HIGH_ADDR_SHIFT	(sizeof(pp2_cookie_t) * 8)
-#define MRVL_COOKIE_HIGH_ADDR_MASK	(~0ULL << MRVL_COOKIE_HIGH_ADDR_SHIFT)
-
 /* Memory size (in bytes) for MUSDK dma buffers */
 #define MRVL_MUSDK_DMA_MEMSIZE 41943040
 
@@ -120,7 +115,6 @@ static int used_bpools[PP2_NUM_PKT_PROC] = {
 
 struct pp2_bpool *mrvl_port_to_bpool_lookup[RTE_MAX_ETHPORTS];
 int mrvl_port_bpool_size[PP2_NUM_PKT_PROC][PP2_BPOOL_NUM_POOLS][RTE_MAX_LCORE];
-uint64_t cookie_addr_high = MRVL_COOKIE_ADDR_INVALID;
 
 struct mrvl_ifnames {
 	const char *names[PP2_NUM_ETH_PPIO * PP2_NUM_PKT_PROC];
@@ -731,7 +725,7 @@ mrvl_flush_tx_shadow_queues(struct rte_eth_dev *dev)
 			mrvl_free_sent_buffers(txq->priv->ppio,
 				hifs[j], j, sq, txq->queue_id, 1);
 			while (sq->tail != sq->head) {
-				uint64_t addr = cookie_addr_high |
+				uint64_t addr =
 					sq->ent[sq->tail].buff.cookie;
 				rte_pktmbuf_free(
 					(struct rte_mbuf *)addr);
@@ -771,14 +765,11 @@ mrvl_flush_bpool(struct rte_eth_dev *dev)
 
 	while (num--) {
 		struct pp2_buff_inf inf;
-		uint64_t addr;
 
 		ret = pp2_bpool_get_buff(hif, priv->bpool, &inf);
 		if (ret)
 			break;
-
-		addr = cookie_addr_high | inf.cookie;
-		rte_pktmbuf_free((struct rte_mbuf *)addr);
+		rte_pktmbuf_free((struct rte_mbuf *)inf.cookie);
 	}
 }
 
@@ -1510,22 +1501,11 @@ mrvl_fill_bpool(struct mrvl_rxq *rxq, int num)
 	if (ret)
 		return ret;
 
-	if (cookie_addr_high == MRVL_COOKIE_ADDR_INVALID)
-		cookie_addr_high =
-			(uint64_t)mbufs[0] & MRVL_COOKIE_HIGH_ADDR_MASK;
 
 	for (i = 0; i < num; i++) {
-		if (((uint64_t)mbufs[i] & MRVL_COOKIE_HIGH_ADDR_MASK)
-			!= cookie_addr_high) {
-			RTE_LOG(ERR, PMD,
-				"mbuf virtual addr high 0x%lx out of range\n",
-				(uint64_t)mbufs[i] >> 32);
-			goto out;
-		}
-
 		entries[i].buff.addr =
 			rte_mbuf_data_iova_default(mbufs[i]);
-		entries[i].buff.cookie = (pp2_cookie_t)(uint64_t)mbufs[i];
+		entries[i].buff.cookie = (uintptr_t)mbufs[i];
 		entries[i].bpool = bpool;
 	}
 
@@ -1697,11 +1677,9 @@ mrvl_rx_queue_release(void *rxq)
 	num = tc_params->inqs_params[inq].size;
 	for (i = 0; i < num; i++) {
 		struct pp2_buff_inf inf;
-		uint64_t addr;
 
 		pp2_bpool_get_buff(hif, q->priv->bpool, &inf);
-		addr = cookie_addr_high | inf.cookie;
-		rte_pktmbuf_free((struct rte_mbuf *)addr);
+		rte_pktmbuf_free((struct rte_mbuf *)inf.cookie);
 	}
 
 	rte_free(q);
@@ -2253,14 +2231,12 @@ mrvl_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 			u64 pref_addr;
 
 			pref_desc = &descs[i + MRVL_MUSDK_PREFETCH_SHIFT];
-			pref_addr = cookie_addr_high |
-				    pp2_ppio_inq_desc_get_cookie(pref_desc);
+			pref_addr = pp2_ppio_inq_desc_get_cookie(pref_desc);
 			rte_mbuf_prefetch_part1((struct rte_mbuf *)(pref_addr));
 			rte_mbuf_prefetch_part2((struct rte_mbuf *)(pref_addr));
 		}
 
-		addr = cookie_addr_high |
-		       pp2_ppio_inq_desc_get_cookie(&descs[i]);
+		addr = pp2_ppio_inq_desc_get_cookie(&descs[i]);
 		mbuf = (struct rte_mbuf *)addr;
 		rte_pktmbuf_reset(mbuf);
 
@@ -2269,7 +2245,7 @@ mrvl_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 		if (unlikely(status != PP2_DESC_ERR_OK)) {
 			struct pp2_buff_inf binf = {
 				.addr = rte_mbuf_data_iova_default(mbuf),
-				.cookie = (pp2_cookie_t)(uint64_t)mbuf,
+				.cookie = (uint64_t)mbuf,
 			};
 
 			pp2_bpool_put_buff(hif, bpool, &binf);
@@ -2321,8 +2297,7 @@ mrvl_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 				ret = pp2_bpool_get_buff(hif, bpool, &buff);
 				if (ret)
 					break;
-				mbuf = (struct rte_mbuf *)
-					(cookie_addr_high | buff.cookie);
+				mbuf = (struct rte_mbuf *)buff.cookie;
 				rte_pktmbuf_free(mbuf);
 			}
 			mrvl_port_bpool_size
@@ -2443,8 +2418,7 @@ mrvl_free_sent_buffers(struct pp2_ppio *ppio, struct pp2_hif *hif,
 		if (unlikely(!entry->bpool)) {
 			struct rte_mbuf *mbuf;
 
-			mbuf = (struct rte_mbuf *)
-			       (cookie_addr_high | entry->buff.cookie);
+			mbuf = (struct rte_mbuf *)entry->buff.cookie;
 			rte_pktmbuf_free(mbuf);
 			skip_bufs = 1;
 			goto skip;
@@ -2530,7 +2504,7 @@ mrvl_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 			rte_mbuf_prefetch_part2(pref_pkt_hdr);
 		}
 
-		sq->ent[sq->head].buff.cookie = (pp2_cookie_t)(uint64_t)mbuf;
+		sq->ent[sq->head].buff.cookie = (uint64_t)mbuf;
 		sq->ent[sq->head].buff.addr =
 			rte_mbuf_data_iova_default(mbuf);
 		sq->ent[sq->head].bpool =
@@ -2571,7 +2545,7 @@ mrvl_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 		for (i = nb_pkts; i < num; i++) {
 			sq->head = (MRVL_PP2_TX_SHADOWQ_SIZE + sq->head - 1) &
 				MRVL_PP2_TX_SHADOWQ_MASK;
-			addr = cookie_addr_high | sq->ent[sq->head].buff.cookie;
+			addr = sq->ent[sq->head].buff.cookie;
 			bytes_sent -=
 				rte_pktmbuf_pkt_len((struct rte_mbuf *)addr);
 		}
