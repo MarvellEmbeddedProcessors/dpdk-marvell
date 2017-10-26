@@ -72,8 +72,7 @@
 /* prefetch shift */
 #define MRVL_MUSDK_PREFETCH_SHIFT 2
 
-/* TCAM has 25 entries reserved for uc/mc filter entries */
-#define MRVL_MAC_ADDRS_MAX 25
+/* Maximum match string length */
 #define MRVL_MATCH_LEN 16
 #define MRVL_PKT_EFFEC_OFFS (MRVL_PKT_OFFS + MV_MH_SIZE)
 /* Maximum allowable packet size */
@@ -415,8 +414,11 @@ mrvl_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 	if (mtu < ETHER_MIN_MTU || mru > MRVL_PKT_SIZE_MAX)
 		return -EINVAL;
 
-	if (!priv->ppio)
+	if (!priv->ppio) {
+		priv->init_cfg.is_set_mtu = 1;
+		priv->init_cfg.mtu = mtu;
 		return 0;
+	}
 
 	ret = pp2_ppio_set_mru(priv->ppio, mru);
 	if (ret)
@@ -440,8 +442,10 @@ mrvl_dev_set_link_up(struct rte_eth_dev *dev)
 	struct mrvl_priv *priv = dev->data->dev_private;
 	int ret;
 
-	if (!priv->ppio)
-		return -EPERM;
+	if (!priv->ppio) {
+		priv->init_cfg.is_link_down = 0;
+		return 0;
+	}
 
 	ret = pp2_ppio_enable(priv->ppio);
 	if (ret)
@@ -474,11 +478,276 @@ static int
 mrvl_dev_set_link_down(struct rte_eth_dev *dev)
 {
 	struct mrvl_priv *priv = dev->data->dev_private;
+	int ret;
+
+	if (!priv->ppio) {
+		priv->init_cfg.is_link_down = 1;
+		return 0;
+	}
+	ret = pp2_ppio_disable(priv->ppio);
+	if (ret)
+		return ret;
+
+	dev->data->dev_link.link_status = ETH_LINK_DOWN;
+	return 0;
+}
+
+/**
+ * DPDK callback to enable promiscuous mode.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mrvl_promiscuous_enable(struct rte_eth_dev *dev)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+	int ret;
+
+	if (priv->isolated)
+		return;
+
+	if (!priv->ppio) {
+		priv->init_cfg.is_promisc = 1;
+		return;
+	}
+
+	ret = pp2_ppio_set_promisc(priv->ppio, 1);
+	if (ret)
+		RTE_LOG(ERR, PMD, "Failed to enable promiscuous mode\n");
+}
+
+/**
+ * DPDK callback to enable allmulti mode.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mrvl_allmulticast_enable(struct rte_eth_dev *dev)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+	int ret;
+
+	if (priv->isolated)
+		return;
+
+	if (!priv->ppio) {
+		priv->init_cfg.is_mc_promisc = 1;
+		return;
+	}
+
+	ret = pp2_ppio_set_mc_promisc(priv->ppio, 1);
+	if (ret)
+		RTE_LOG(ERR, PMD, "Failed enable all-multicast mode\n");
+}
+
+/**
+ * DPDK callback to disable promiscuous mode.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mrvl_promiscuous_disable(struct rte_eth_dev *dev)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+	int ret;
+
+	if (priv->isolated)
+		return;
+
+	if (!priv->ppio) {
+		priv->init_cfg.is_promisc = 0;
+		return;
+	}
+
+	ret = pp2_ppio_set_promisc(priv->ppio, 0);
+	if (ret)
+		RTE_LOG(ERR, PMD, "Failed to disable promiscuous mode\n");
+}
+
+/**
+ * DPDK callback to disable allmulticast mode.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mrvl_allmulticast_disable(struct rte_eth_dev *dev)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+	int ret;
+
+	if (priv->isolated)
+		return;
+
+	if (!priv->ppio) {
+		priv->init_cfg.is_mc_promisc = 0;
+		return;
+	}
+
+	ret = pp2_ppio_set_mc_promisc(priv->ppio, 0);
+	if (ret)
+		RTE_LOG(ERR, PMD, "Failed to disable all-multicast mode\n");
+}
+
+/**
+ * DPDK callback to remove a MAC address.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param index
+ *   MAC address index.
+ */
+static void
+mrvl_mac_addr_remove(struct rte_eth_dev *dev, uint32_t index)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+	char buf[ETHER_ADDR_FMT_SIZE];
+	int ret;
+
+	if (priv->isolated)
+		return;
 
 	if (!priv->ppio)
-		return -EPERM;
+		return;
 
-	return pp2_ppio_disable(priv->ppio);
+	ret = pp2_ppio_remove_mac_addr(priv->ppio,
+				       dev->data->mac_addrs[index].addr_bytes);
+	if (ret) {
+		ether_format_addr(buf, sizeof(buf),
+				  &dev->data->mac_addrs[index]);
+		RTE_LOG(ERR, PMD, "Failed to remove mac %s\n", buf);
+	}
+}
+
+/**
+ * DPDK callback to add a MAC address.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param mac_addr
+ *   MAC address to register.
+ * @param index
+ *   MAC address index.
+ * @param vmdq
+ *   VMDq pool index to associate address with (unused).
+ *
+ * @return
+ *   0 on success, negative error value otherwise.
+ */
+static int
+mrvl_mac_addr_add(struct rte_eth_dev *dev, struct ether_addr *mac_addr,
+		  uint32_t index, uint32_t vmdq __rte_unused)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+	char buf[ETHER_ADDR_FMT_SIZE];
+	int ret;
+
+	if (priv->isolated)
+		return -ENOTSUP;
+
+	if (index == 0)
+		/* For setting index 0, mrvl_mac_addr_set() should be used.*/
+		return -1;
+
+	if (!priv->ppio) {
+		uint32_t idx = priv->init_cfg.mac_addr_add_num;
+
+		if (idx == MRVL_MAC_ADDRS_MAX)
+			return -ENOMEM;
+		priv->init_cfg.mac_addr_to_add_idx[idx] = index;
+		memcpy(&priv->init_cfg.mac_addr_to_add[idx],
+			mac_addr, sizeof(*mac_addr));
+		priv->init_cfg.mac_addr_add_num++;
+		return 0;
+	}
+
+	/*
+	 * Maximum number of uc addresses can be tuned via kernel module mvpp2x
+	 * parameter uc_filter_max. Maximum number of mc addresses is then
+	 * MRVL_MAC_ADDRS_MAX - uc_filter_max. Currently it defaults to 4 and
+	 * 21 respectively.
+	 *
+	 * If more than uc_filter_max uc addresses were added to filter list
+	 * then NIC will switch to promiscuous mode automatically.
+	 *
+	 * If more than MRVL_MAC_ADDRS_MAX - uc_filter_max number mc addresses
+	 * were added to filter list then NIC will switch to all-multicast mode
+	 * automatically.
+	 */
+	ret = pp2_ppio_add_mac_addr(priv->ppio, mac_addr->addr_bytes);
+	if (ret) {
+		ether_format_addr(buf, sizeof(buf), mac_addr);
+		RTE_LOG(ERR, PMD, "Failed to add mac %s\n", buf);
+		return -1;
+	}
+
+	return 0;
+}
+
+/**
+ * DPDK callback to set the primary MAC address.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param mac_addr
+ *   MAC address to register.
+ */
+static void
+mrvl_mac_addr_set(struct rte_eth_dev *dev, struct ether_addr *mac_addr)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+
+	if (priv->isolated)
+		return;
+
+	if (!priv->ppio) {
+		priv->init_cfg.is_mac_addr_to_set = 1;
+		memcpy(&priv->init_cfg.mac_addr_to_set,
+			mac_addr, sizeof(*mac_addr));
+		return;
+	}
+
+	pp2_ppio_set_mac_addr(priv->ppio, mac_addr->addr_bytes);
+}
+
+/**
+ * DPDK callback to Configure a VLAN filter.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param vlan_id
+ *   VLAN ID to filter.
+ * @param on
+ *   Toggle filter.
+ *
+ * @return
+ *   0 on success, negative error value otherwise.
+ */
+static int
+mrvl_vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+
+	if (priv->isolated)
+		return -ENOTSUP;
+
+	if (!priv->ppio) {
+		if (on) {
+			int idx = priv->init_cfg.vlan_fltrs_num;
+
+			if (idx == MRVL_PRS_VLAN_FILT_MAX)
+				return -ENOMEM;
+			priv->init_cfg.vlan_fltrs_to_add[idx] = vlan_id;
+			priv->init_cfg.vlan_fltrs_num++;
+		}
+		return 0;
+	}
+
+	return on ? pp2_ppio_add_vlan(priv->ppio, vlan_id) :
+		    pp2_ppio_remove_vlan(priv->ppio, vlan_id);
 }
 
 /**
@@ -633,6 +902,39 @@ mrvl_dev_start(struct rte_eth_dev *dev)
 		}
 		priv->vlan_flushed = 1;
 	}
+	/*
+	 * In case that some initial configurations were done before ppio
+	 * object was initialized perform them here.
+	 */
+
+	if (priv->init_cfg.is_set_mtu) {
+		ret = mrvl_mtu_set(dev, priv->init_cfg.mtu);
+		if (ret)
+			RTE_LOG(ERR, PMD, "Failed to set MTU to %d\n",
+				priv->init_cfg.mtu);
+	}
+
+	if (priv->init_cfg.is_promisc)
+		mrvl_promiscuous_enable(dev);
+	else
+		if (priv->init_cfg.is_mc_promisc)
+			mrvl_allmulticast_enable(dev);
+
+	if (priv->init_cfg.is_mac_addr_to_set)
+		mrvl_mac_addr_set(dev, &priv->init_cfg.mac_addr_to_set);
+
+	for (i = 0; i < priv->init_cfg.mac_addr_add_num; i++)
+		mrvl_mac_addr_add(dev, &priv->init_cfg.mac_addr_to_add[i],
+				  priv->init_cfg.mac_addr_to_add_idx[i], 0);
+
+	for (i = 0; i < priv->init_cfg.vlan_fltrs_num; i++) {
+		ret = mrvl_vlan_filter_set(dev,
+				priv->init_cfg.vlan_fltrs_to_add[i], 1);
+		if (ret) {
+			RTE_LOG(ERR, PMD, "Failed to setup VLAN filter\n");
+			goto out;
+		}
+	}
 
 	/* For default QoS config, don't start classifier. */
 	if (mrvl_qos_cfg) {
@@ -643,10 +945,12 @@ mrvl_dev_start(struct rte_eth_dev *dev)
 		}
 	}
 
-	ret = mrvl_dev_set_link_up(dev);
-	if (ret) {
-		RTE_LOG(ERR, PMD, "Failed to set link up\n");
-		goto out;
+	if (!priv->init_cfg.is_link_down) {
+		ret = mrvl_dev_set_link_up(dev);
+		if (ret) {
+			RTE_LOG(ERR, PMD, "Failed to set link UP\n");
+			goto out;
+		}
 	}
 
 	/* start tx queues */
@@ -905,206 +1209,6 @@ mrvl_link_update(struct rte_eth_dev *dev, int wait_to_complete __rte_unused)
 	dev->data->dev_link.link_status = link_up ? ETH_LINK_UP : ETH_LINK_DOWN;
 
 	return 0;
-}
-
-/**
- * DPDK callback to enable promiscuous mode.
- *
- * @param dev
- *   Pointer to Ethernet device structure.
- */
-static void
-mrvl_promiscuous_enable(struct rte_eth_dev *dev)
-{
-	struct mrvl_priv *priv = dev->data->dev_private;
-	int ret;
-
-	if (!priv->ppio)
-		return;
-
-	if (priv->isolated)
-		return;
-
-	ret = pp2_ppio_set_promisc(priv->ppio, 1);
-	if (ret)
-		RTE_LOG(ERR, PMD, "Failed to enable promiscuous mode\n");
-}
-
-/**
- * DPDK callback to enable allmulti mode.
- *
- * @param dev
- *   Pointer to Ethernet device structure.
- */
-static void
-mrvl_allmulticast_enable(struct rte_eth_dev *dev)
-{
-	struct mrvl_priv *priv = dev->data->dev_private;
-	int ret;
-
-	if (!priv->ppio)
-		return;
-
-	if (priv->isolated)
-		return;
-
-	ret = pp2_ppio_set_mc_promisc(priv->ppio, 1);
-	if (ret)
-		RTE_LOG(ERR, PMD, "Failed enable all-multicast mode\n");
-}
-
-/**
- * DPDK callback to disable promiscuous mode.
- *
- * @param dev
- *   Pointer to Ethernet device structure.
- */
-static void
-mrvl_promiscuous_disable(struct rte_eth_dev *dev)
-{
-	struct mrvl_priv *priv = dev->data->dev_private;
-	int ret;
-
-	if (!priv->ppio)
-		return;
-
-	ret = pp2_ppio_set_promisc(priv->ppio, 0);
-	if (ret)
-		RTE_LOG(ERR, PMD, "Failed to disable promiscuous mode\n");
-}
-
-/**
- * DPDK callback to disable allmulticast mode.
- *
- * @param dev
- *   Pointer to Ethernet device structure.
- */
-static void
-mrvl_allmulticast_disable(struct rte_eth_dev *dev)
-{
-	struct mrvl_priv *priv = dev->data->dev_private;
-	int ret;
-
-	if (!priv->ppio)
-		return;
-
-	ret = pp2_ppio_set_mc_promisc(priv->ppio, 0);
-	if (ret)
-		RTE_LOG(ERR, PMD, "Failed to disable all-multicast mode\n");
-}
-
-/**
- * DPDK callback to remove a MAC address.
- *
- * @param dev
- *   Pointer to Ethernet device structure.
- * @param index
- *   MAC address index.
- */
-static void
-mrvl_mac_addr_remove(struct rte_eth_dev *dev, uint32_t index)
-{
-	struct mrvl_priv *priv = dev->data->dev_private;
-	char buf[ETHER_ADDR_FMT_SIZE];
-	int ret;
-
-	if (!priv->ppio)
-		return;
-
-	if (priv->isolated)
-		return;
-
-	ret = pp2_ppio_remove_mac_addr(priv->ppio,
-				       dev->data->mac_addrs[index].addr_bytes);
-	if (ret) {
-		ether_format_addr(buf, sizeof(buf),
-				  &dev->data->mac_addrs[index]);
-		RTE_LOG(ERR, PMD, "Failed to remove mac %s\n", buf);
-	}
-}
-
-/**
- * DPDK callback to add a MAC address.
- *
- * @param dev
- *   Pointer to Ethernet device structure.
- * @param mac_addr
- *   MAC address to register.
- * @param index
- *   MAC address index.
- * @param vmdq
- *   VMDq pool index to associate address with (unused).
- *
- * @return
- *   0 on success, negative error value otherwise.
- */
-static int
-mrvl_mac_addr_add(struct rte_eth_dev *dev, struct ether_addr *mac_addr,
-		  uint32_t index, uint32_t vmdq __rte_unused)
-{
-	struct mrvl_priv *priv = dev->data->dev_private;
-	char buf[ETHER_ADDR_FMT_SIZE];
-	int ret;
-
-	if (priv->isolated)
-		return -ENOTSUP;
-
-	if (index == 0)
-		/* For setting index 0, mrvl_mac_addr_set() should be used.*/
-		return -1;
-
-	if (!priv->ppio)
-		return 0;
-
-	/*
-	 * Maximum number of uc addresses can be tuned via kernel module mvpp2x
-	 * parameter uc_filter_max. Maximum number of mc addresses is then
-	 * MRVL_MAC_ADDRS_MAX - uc_filter_max. Currently it defaults to 4 and
-	 * 21 respectively.
-	 *
-	 * If more than uc_filter_max uc addresses were added to filter list
-	 * then NIC will switch to promiscuous mode automatically.
-	 *
-	 * If more than MRVL_MAC_ADDRS_MAX - uc_filter_max number mc addresses
-	 * were added to filter list then NIC will switch to all-multicast mode
-	 * automatically.
-	 */
-	ret = pp2_ppio_add_mac_addr(priv->ppio, mac_addr->addr_bytes);
-	if (ret) {
-		ether_format_addr(buf, sizeof(buf), mac_addr);
-		RTE_LOG(ERR, PMD, "Failed to add mac %s\n", buf);
-		return -1;
-	}
-
-	return 0;
-}
-
-/**
- * DPDK callback to set the primary MAC address.
- *
- * @param dev
- *   Pointer to Ethernet device structure.
- * @param mac_addr
- *   MAC address to register.
- */
-static void
-mrvl_mac_addr_set(struct rte_eth_dev *dev, struct ether_addr *mac_addr)
-{
-	struct mrvl_priv *priv = dev->data->dev_private;
-	int ret;
-
-	if (!priv->ppio)
-		return;
-
-	if (priv->isolated)
-		return;
-
-	ret = pp2_ppio_set_mac_addr(priv->ppio, mac_addr->addr_bytes);
-	if (ret) {
-		char buf[ETHER_ADDR_FMT_SIZE];
-		ether_format_addr(buf, sizeof(buf), mac_addr);
-		RTE_LOG(ERR, PMD, "Failed to set mac to %s\n", buf);
-	}
 }
 
 /**
@@ -1442,34 +1546,6 @@ static void mrvl_txq_info_get(struct rte_eth_dev *dev, uint16_t tx_queue_id,
 	qinfo->nb_desc =
 		priv->ppio_params.outqs_params.outqs_params[tx_queue_id].size;
 	qinfo->conf.tx_deferred_start = txq->tx_deferred_start;
-}
-
-/**
- * DPDK callback to Configure a VLAN filter.
- *
- * @param dev
- *   Pointer to Ethernet device structure.
- * @param vlan_id
- *   VLAN ID to filter.
- * @param on
- *   Toggle filter.
- *
- * @return
- *   0 on success, negative error value otherwise.
- */
-static int
-mrvl_vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
-{
-	struct mrvl_priv *priv = dev->data->dev_private;
-
-	if (!priv->ppio)
-		return -EPERM;
-
-	if (priv->isolated)
-		return -ENOTSUP;
-
-	return on ? pp2_ppio_add_vlan(priv->ppio, vlan_id) :
-		    pp2_ppio_remove_vlan(priv->ppio, vlan_id);
 }
 
 /**

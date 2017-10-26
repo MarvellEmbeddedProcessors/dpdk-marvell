@@ -37,7 +37,7 @@
 
 #include <rte_spinlock.h>
 #include <rte_flow_driver.h>
-
+#include <rte_ethdev.h>
 #include <env/mv_autogen_comp_flags.h>
 #include <drivers/mv_pp2.h>
 #include <drivers/mv_pp2_bpool.h>
@@ -87,6 +87,34 @@
 /** Minimum number of sent buffers to release from shadow queue to BM */
 #define MRVL_PP2_BUF_RELEASE_BURST_SIZE	64
 
+/* TCAM has 25 entries reserved for uc/mc filter entries */
+#define MRVL_MAC_ADDRS_MAX 25
+
+/** Maximum number of VLAN tags in initial configuration. */
+/* There is a TCAM range reserved for VLAN filtering entries, range size is 33
+ * 10 VLAN ID filter entries per port
+ * 1 default VLAN filter entry per port
+ * It is assumed that there are 3 ports for filter, not including loopback port
+ */
+#define MRVL_PRS_VLAN_FILT_MAX 10
+
+
+
+struct mrvl_config {
+	int is_set_mtu;
+	uint16_t mtu;
+	int is_link_down;
+	int is_promisc;
+	int is_mc_promisc;
+	uint32_t mac_addr_to_add_idx[MRVL_MAC_ADDRS_MAX];
+	struct ether_addr mac_addr_to_add[MRVL_MAC_ADDRS_MAX];
+	int mac_addr_add_num;
+	struct ether_addr mac_addr_to_set;
+	int is_mac_addr_to_set;
+	uint16_t vlan_fltrs_to_add[MRVL_PRS_VLAN_FILT_MAX];
+	int vlan_fltrs_num;
+};
+
 struct mrvl_priv {
 	/* Hot fields, used in fast path. */
 	struct pp2_bpool *bpool;  /**< BPool pointer */
@@ -110,6 +138,7 @@ struct mrvl_priv {
 	uint8_t uc_mc_flushed;
 	uint8_t vlan_flushed;
 	uint8_t isolated;
+	struct mrvl_config init_cfg;
 
 	struct pp2_ppio_params ppio_params;
 	struct pp2_cls_qos_tbl_params qos_tbl_params;
