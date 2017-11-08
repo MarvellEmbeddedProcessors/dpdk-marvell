@@ -173,6 +173,32 @@ static inline void mrvl_free_sent_buffers(struct pp2_ppio *ppio,
 			struct pp2_hif *hif, unsigned int core_id,
 			struct mrvl_shadow_txq *sq, int qid, int force);
 
+#define MRVL_XSTATS_TBL_ENTRY(name) { \
+	#name, offsetof(struct pp2_ppio_statistics, name),	\
+	sizeof(((struct pp2_ppio_statistics *)0)->name)		\
+}
+
+/* Table with xstats data */
+static struct {
+	const char *name;
+	unsigned int offset;
+	unsigned int size;
+} mrvl_xstats_tbl[] = {
+	MRVL_XSTATS_TBL_ENTRY(rx_bytes),
+	MRVL_XSTATS_TBL_ENTRY(rx_packets),
+	MRVL_XSTATS_TBL_ENTRY(rx_unicast_packets),
+	MRVL_XSTATS_TBL_ENTRY(rx_errors),
+	MRVL_XSTATS_TBL_ENTRY(rx_fullq_dropped),
+	MRVL_XSTATS_TBL_ENTRY(rx_bm_dropped),
+	MRVL_XSTATS_TBL_ENTRY(rx_early_dropped),
+	MRVL_XSTATS_TBL_ENTRY(rx_fifo_dropped),
+	MRVL_XSTATS_TBL_ENTRY(rx_cls_dropped),
+	MRVL_XSTATS_TBL_ENTRY(tx_bytes),
+	MRVL_XSTATS_TBL_ENTRY(tx_packets),
+	MRVL_XSTATS_TBL_ENTRY(tx_unicast_packets),
+	MRVL_XSTATS_TBL_ENTRY(tx_errors)
+};
+
 static inline int
 mrvl_get_bpool_size(int pp2_id, int pool_id)
 {
@@ -1138,6 +1164,89 @@ mrvl_stats_reset(struct rte_eth_dev *dev)
 }
 
 /**
+ * DPDK callback to get extended statistics.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param stats
+ *   Pointer to xstats table.
+ * @param n
+ *   Number of entries in xstats table.
+ * @return
+ *   Negative value on error, number of read xstats otherwise.
+ */
+static int
+mrvl_xstats_get(struct rte_eth_dev *dev,
+		struct rte_eth_xstat *stats, unsigned n)
+{
+	struct mrvl_priv *priv = dev->data->dev_private;
+	struct pp2_ppio_statistics ppio_stats;
+	unsigned i;
+
+	if (!stats)
+		return 0;
+
+	pp2_ppio_get_statistics(priv->ppio, &ppio_stats, 0);
+	for (i = 0; i < n && i < RTE_DIM(mrvl_xstats_tbl); i++) {
+		uint64_t val;
+
+		if (mrvl_xstats_tbl[i].size == sizeof(uint32_t))
+			val = *(uint32_t *)((uint8_t *)&ppio_stats +
+					    mrvl_xstats_tbl[i].offset);
+		else if (mrvl_xstats_tbl[i].size == sizeof(uint64_t))
+			val = *(uint64_t *)((uint8_t *)&ppio_stats +
+					    mrvl_xstats_tbl[i].offset);
+		else
+			return -EINVAL;
+
+		stats[i].id = i;
+		stats[i].value = val;
+	}
+
+	return n;
+}
+
+/**
+ * DPDK callback to reset extended statistics.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mrvl_xstats_reset(struct rte_eth_dev *dev)
+{
+	mrvl_stats_reset(dev);
+}
+
+/**
+ * DPDK callback to get extended statistics names.
+ *
+ * @param dev (unused)
+ *   Pointer to Ethernet device structure.
+ * @param xstats_names
+ *   Pointer to xstats names table.
+ * @param size
+ *   Size of the xstats names table.
+ * @return
+ *   Number of read names.
+ */
+static int
+mrvl_xstats_get_names(struct rte_eth_dev *dev __rte_unused,
+		      struct rte_eth_xstat_name *xstats_names, unsigned size)
+{
+	unsigned i;
+
+	if (!xstats_names)
+		return RTE_DIM(mrvl_xstats_tbl);
+
+	for (i = 0; i < size && i < RTE_DIM(mrvl_xstats_tbl); i++)
+		snprintf(xstats_names[i].name, RTE_ETH_XSTATS_NAME_SIZE, "%s",
+			 mrvl_xstats_tbl[i].name);
+
+	return size;
+}
+
+/**
  * DPDK callback to get information about the device.
  *
  * @param dev
@@ -1702,6 +1811,94 @@ mrvl_eth_filter_ctrl(struct rte_eth_dev *dev __rte_unused,
 	}
 }
 
+/**
+ * DPDK callback to get xstats by id.
+ *
+ * @param dev
+ *   Pointer to the device structure.
+ * @param ids
+ *   Pointer to the ids table.
+ * @param values
+ *   Pointer to the values table.
+ * @param n
+ *   Values table size.
+ * @returns
+ *   Number of read values, negative value otherwise.
+ */
+static int
+mrvl_xstats_get_by_id(struct rte_eth_dev *dev, const uint64_t *ids,
+		      uint64_t *values, unsigned int n)
+{
+	unsigned int i, num = RTE_DIM(mrvl_xstats_tbl);
+	uint64_t vals[n];
+	int ret;
+
+	if (!ids) {
+		struct rte_eth_xstat xstats[num];
+		int j;
+
+		ret = mrvl_xstats_get(dev, xstats, num);
+		for (j = 0; j < ret; i++)
+			values[j] = xstats[j].value;
+
+		return ret;
+	}
+
+	ret = mrvl_xstats_get_by_id(dev, NULL, vals, n);
+	if (ret < 0)
+		return ret;
+
+	for (i = 0; i < n; i++) {
+		if (ids[i] >= num) {
+			RTE_LOG(ERR, PMD, "id value is not valid\n");
+			return -1;
+		}
+
+		values[i] = vals[ids[i]];
+	}
+
+	return n;
+}
+
+/**
+ * DPDK callback to get xstats names by ids.
+ *
+ * @param dev
+ *   Pointer to the device structure.
+ * @param xstats_names
+ *   Pointer to table with xstats names.
+ * @param ids
+ *   Pointer to table with ids.
+ * @param size
+ *   Xstats names table size.
+ * @returns
+ *   Number of names read, negative value otherwise.
+ */
+static int
+mrvl_xstats_get_names_by_id(struct rte_eth_dev *dev,
+			    struct rte_eth_xstat_name *xstats_names,
+			    const uint64_t *ids, unsigned int size)
+{
+	unsigned int i, num = RTE_DIM(mrvl_xstats_tbl);
+	struct rte_eth_xstat_name names[num];
+
+	if (!ids)
+		return mrvl_xstats_get_names(dev, xstats_names, size);
+
+	mrvl_xstats_get_names(dev, names, size);
+	for (i = 0; i < size; i++) {
+		if (ids[i] >= num) {
+			RTE_LOG(ERR, PMD, "id value is not valid");
+			return -1;
+		}
+
+		snprintf(xstats_names[i].name, RTE_ETH_XSTATS_NAME_SIZE,
+			 "%s", names[ids[i]].name);
+	}
+
+	return size;
+}
+
 static const struct eth_dev_ops mrvl_ops = {
 	.dev_configure = mrvl_dev_configure,
 	.dev_start = mrvl_dev_start,
@@ -1720,6 +1917,9 @@ static const struct eth_dev_ops mrvl_ops = {
 	.mtu_set = mrvl_mtu_set,
 	.stats_get = mrvl_stats_get,
 	.stats_reset = mrvl_stats_reset,
+	.xstats_get = mrvl_xstats_get,
+	.xstats_reset = mrvl_xstats_reset,
+	.xstats_get_names = mrvl_xstats_get_names,
 	.dev_infos_get = mrvl_dev_infos_get,
 	.dev_supported_ptypes_get = mrvl_dev_supported_ptypes_get,
 	.rxq_info_get = mrvl_rxq_info_get,
@@ -1731,7 +1931,9 @@ static const struct eth_dev_ops mrvl_ops = {
 	.tx_queue_release = mrvl_tx_queue_release,
 	.rss_hash_update = mrvl_rss_hash_update,
 	.rss_hash_conf_get = mrvl_rss_hash_conf_get,
-	.filter_ctrl = mrvl_eth_filter_ctrl
+	.filter_ctrl = mrvl_eth_filter_ctrl,
+	.xstats_get_by_id = mrvl_xstats_get_by_id,
+	.xstats_get_names_by_id = mrvl_xstats_get_names_by_id
 };
 
 /**
