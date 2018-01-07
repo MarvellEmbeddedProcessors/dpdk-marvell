@@ -507,10 +507,10 @@ static const struct option lgopts[] = {
  * value of 8192
  */
 #define NB_MBUF RTE_MAX(	\
-	(nb_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT +	\
-	nb_ports*nb_lcores*MAX_PKT_BURST +			\
-	nb_ports*n_tx_queue*RTE_TEST_TX_DESC_DEFAULT +		\
-	nb_lcores*MEMPOOL_CACHE_SIZE),				\
+	(nb_ports*nb_rx_queue*nb_rxd +		\
+	nb_ports*nb_lcores*MAX_PKT_BURST +	\
+	nb_ports*n_tx_queue*nb_txd +		\
+	nb_lcores*MEMPOOL_CACHE_SIZE),		\
 	(unsigned)8192)
 
 /* Parse the argument given in the command line of the application */
@@ -765,6 +765,10 @@ init_mem(unsigned nb_mbuf, unsigned buf_size)
 				socketid, lcore_id, NB_SOCKETS);
 		}
 
+		if (buf_size < RTE_MBUF_DEFAULT_DATAROOM)
+			buf_size = RTE_MBUF_DEFAULT_DATAROOM;
+		buf_size += RTE_PKTMBUF_HEADROOM;
+
 		if (pktmbuf_pool[socketid] == NULL) {
 			snprintf(s, sizeof(s), "mbuf_pool_%d", socketid);
 			pktmbuf_pool[socketid] =
@@ -897,9 +901,6 @@ main(int argc, char **argv)
 		rte_exit(EXIT_FAILURE, "check_port_config failed\n");
 
 	nb_lcores = rte_lcore_count();
-	if (!burst_size)
-		burst_size = MAX_PKT_BURST >> (nb_lcores - 1);
-
 	printf("nb_ports: %d, nb_lcores: %d, nb_lcore_params: %d, burst_size: %d\n",
 		nb_ports, nb_lcores, nb_lcore_params, burst_size);
 
@@ -912,15 +913,18 @@ main(int argc, char **argv)
 		}
 
 		/* init port */
-		printf("Initializing port %d ... ", portid);
+		printf("Initializing port %d ...\n", portid);
 		fflush(stdout);
 
 		nb_rx_queue = get_port_n_rx_queues(portid);
-		n_tx_queue = nb_lcores;
+		n_tx_queue = nb_rx_queue;
 		if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
 			n_tx_queue = MAX_TX_QUEUE_PER_PORT;
-		printf("Creating queues: nb_rxq=%d nb_txq=%u... ",
-			nb_rx_queue, (unsigned)n_tx_queue);
+
+		if (!burst_size)
+			burst_size = MAX_PKT_BURST >> (nb_rx_queue - 1);
+		printf("Creating queues for port %d: nb_rxq=%d nb_txq=%u...",
+			portid, nb_rx_queue, (unsigned)n_tx_queue);
 		ret = rte_eth_dev_configure(portid, nb_rx_queue,
 					(uint16_t)n_tx_queue, &port_conf);
 		if (ret < 0)
@@ -937,44 +941,14 @@ main(int argc, char **argv)
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "init_mem failed\n");
 
-		/* init one TX queue per couple (lcore,port) */
-		queueid = 0;
-		for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
-			if (rte_lcore_is_enabled(lcore_id) == 0)
-				continue;
-
-			if (numa_on)
-				socketid =
-				(uint8_t)rte_lcore_to_socket_id(lcore_id);
-			else
-				socketid = 0;
-
-			printf("txq=%u,%d,%d ", lcore_id, queueid, socketid);
-			fflush(stdout);
-
-			rte_eth_dev_info_get(portid, &dev_info);
-			txconf = &dev_info.default_txconf;
-			if (port_conf.rxmode.jumbo_frame)
-				txconf->txq_flags = 0;
-			ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
-						     socketid, txconf);
-			if (ret < 0)
-				rte_exit(EXIT_FAILURE,
-					"rte_eth_tx_queue_setup: err=%d, "
-					"port=%d\n", ret, portid);
-
-			qconf = &lcore_conf[lcore_id];
-			queueid++;
-
-		}
-		printf("\n");
 	}
 
 	for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
 		if (rte_lcore_is_enabled(lcore_id) == 0)
 			continue;
 		qconf = &lcore_conf[lcore_id];
-		printf("\nInitializing rx queues on lcore %u ...\n", lcore_id);
+		printf("\nInitializing rx and tx queues on lcore %u ...\n",
+			lcore_id);
 		fflush(stdout);
 		/* init RX queues */
 		for (queue = 0; queue < qconf->n_rx_queue; ++queue) {
@@ -998,6 +972,20 @@ main(int argc, char **argv)
 				rte_exit(EXIT_FAILURE,
 				"rte_eth_rx_queue_setup: err=%d, port=%d\n",
 				ret, portid);
+
+			printf(", txq=%d,%d,%d\n", portid, queueid, socketid);
+			fflush(stdout);
+			rte_eth_dev_info_get(portid, &dev_info);
+			txconf = &dev_info.default_txconf;
+			if (port_conf.rxmode.jumbo_frame)
+				txconf->txq_flags = 0;
+
+			ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
+						     socketid, txconf);
+			if (ret < 0)
+				rte_exit(EXIT_FAILURE,
+					"rte_eth_tx_queue_setup: err=%d, "
+					"port=%d\n", ret, portid);
 		}
 	}
 
