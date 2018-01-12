@@ -51,6 +51,7 @@
 #include <rte_mvep_common.h>
 #include "mrvl_ethdev.h"
 #include "mrvl_qos.h"
+#include "mrvl_mtr.h"
 
 /* bitmask with reserved hifs */
 #define MRVL_MUSDK_HIFS_RESERVED 0x0F
@@ -64,8 +65,6 @@
 /* prefetch shift */
 #define MRVL_MUSDK_PREFETCH_SHIFT 2
 
-/* Maximum match string length */
-#define MRVL_MATCH_LEN 16
 #define MRVL_PKT_EFFEC_OFFS (MRVL_PKT_OFFS + MV_MH_SIZE)
 /* Maximum allowable packet size */
 #define MRVL_PKT_SIZE_MAX (10240 - MV_MH_SIZE)
@@ -963,6 +962,8 @@ mrvl_dev_start(struct rte_eth_dev *dev)
 			goto out;
 	}
 
+	mrvl_mtr_init(dev);
+
 	return 0;
 out:
 	RTE_LOG(ERR, PMD, "Failed to start device\n");
@@ -1099,6 +1100,7 @@ mrvl_dev_close(struct rte_eth_dev *dev)
 
 	mrvl_flush_rx_queues(dev);
 	mrvl_flush_tx_shadow_queues(dev);
+	mrvl_mtr_deinit(dev);
 
 	for (i = 0; i < priv->ppio_params.inqs_params.num_tcs; ++i) {
 		struct pp2_ppio_tc_params *tc_params =
@@ -2128,6 +2130,25 @@ mrvl_xstats_get_names_by_id(struct rte_eth_dev *dev,
 	return size;
 }
 
+/**
+ * DPDK callback to get rte_mtr callbacks.
+ *
+ * @param dev
+ *   Pointer to the device structure.
+ * @param ops
+ *   Pointer to pass the mtr ops.
+ *
+ * @return
+ *   Always 0.
+ */
+static int
+mrvl_mtr_ops_get(struct rte_eth_dev *dev __rte_unused, void *ops)
+{
+	*(const void **)ops = &mrvl_mtr_ops;
+
+	return 0;
+}
+
 static const struct eth_dev_ops mrvl_ops = {
 	.dev_configure = mrvl_dev_configure,
 	.dev_start = mrvl_dev_start,
@@ -2166,7 +2187,8 @@ static const struct eth_dev_ops mrvl_ops = {
 	.rss_hash_conf_get = mrvl_rss_hash_conf_get,
 	.filter_ctrl = mrvl_eth_filter_ctrl,
 	.xstats_get_by_id = mrvl_xstats_get_by_id,
-	.xstats_get_names_by_id = mrvl_xstats_get_names_by_id
+	.xstats_get_names_by_id = mrvl_xstats_get_names_by_id,
+	.mtr_ops_get = mrvl_mtr_ops_get
 };
 
 /**
