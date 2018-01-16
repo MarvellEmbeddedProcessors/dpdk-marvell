@@ -612,6 +612,8 @@ mrvl_crypto_pmd_qp_setup(struct rte_cryptodev *dev, uint16_t qp_id,
 		if (sam_cio_init(&qp->cio_params, &qp->cio) < 0)
 			break;
 
+		CDEV_LOG_INFO("%s created for qp_id = %d\n", match, qp_id);
+
 		qp->sess_mp = session_pool;
 
 		memset(&qp->stats, 0, sizeof(qp->stats));
