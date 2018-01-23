@@ -38,6 +38,7 @@
 #include <rte_spinlock.h>
 #include <rte_flow_driver.h>
 #include <rte_mtr_driver.h>
+#include <rte_tm_driver.h>
 
 /*
  * container_of is defined by both DPDK and MUSDK,
@@ -190,6 +191,29 @@ struct mrvl_mtr {
 	struct pp2_cls_plcr *plcr;
 };
 
+struct mrvl_tm_shaper_profile {
+	LIST_ENTRY(mrvl_tm_shaper_profile) next;
+	uint32_t id;
+	int refcnt;
+	struct rte_tm_shaper_params params;
+};
+
+enum {
+	MRVL_NODE_PORT,
+	MRVL_NODE_QUEUE,
+};
+
+struct mrvl_tm_node {
+	LIST_ENTRY(mrvl_tm_node) next;
+	uint32_t id;
+	uint32_t type;
+	int refcnt;
+	struct mrvl_tm_node *parent;
+	struct mrvl_tm_shaper_profile *profile;
+	uint8_t weight;
+	uint64_t stats_mask;
+};
+
 struct mrvl_priv {
 	/* Hot fields, used in fast path. */
 	struct pp2_bpool *bpool;  /**< BPool pointer */
@@ -230,6 +254,10 @@ struct mrvl_priv {
 	LIST_HEAD(profiles, mrvl_mtr_profile) profiles;
 	LIST_HEAD(mtrs, mrvl_mtr) mtrs;
 	uint32_t used_plcrs;
+
+	LIST_HEAD(shaper_profiles, mrvl_tm_shaper_profile) shaper_profiles;
+	LIST_HEAD(nodes, mrvl_tm_node) nodes;
+	uint64_t rate_max;
 };
 
 /** Flow operations forward declaration. */
@@ -237,5 +265,8 @@ extern const struct rte_flow_ops mrvl_flow_ops;
 
 /** Meter operations forward declaration. */
 extern const struct rte_mtr_ops mrvl_mtr_ops;
+
+/** Traffic manager operations forward declaration. */
+extern const struct rte_tm_ops mrvl_tm_ops;
 
 #endif /* _MRVL_ETHDEV_H_ */

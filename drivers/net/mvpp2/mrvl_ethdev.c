@@ -53,6 +53,7 @@
 #include "mrvl_qos.h"
 #include "mrvl_flow.h"
 #include "mrvl_mtr.h"
+#include "mrvl_tm.h"
 
 /* bitmask with reserved hifs */
 #define MRVL_MUSDK_HIFS_RESERVED 0x0F
@@ -368,6 +369,10 @@ mrvl_dev_configure(struct rte_eth_dev *dev)
 	priv->ppio_params.outqs_params.num_outqs = dev->data->nb_tx_queues;
 	priv->ppio_params.maintain_stats = 1;
 	priv->nb_rx_queues = dev->data->nb_rx_queues;
+
+	ret = mrvl_tm_init(dev);
+	if (ret < 0)
+		return ret;
 
 	if (dev->data->nb_rx_queues == 1 &&
 	    dev->data->dev_conf.rxmode.mq_mode == ETH_MQ_RX_RSS) {
@@ -1126,6 +1131,7 @@ mrvl_dev_close(struct rte_eth_dev *dev)
 	}
 
 	mrvl_flush_bpool(dev);
+	mrvl_tm_deinit(dev);
 
 	if (priv->ppio) {
 		pp2_ppio_deinit(priv->ppio);
@@ -2152,6 +2158,25 @@ mrvl_mtr_ops_get(struct rte_eth_dev *dev __rte_unused, void *ops)
 	return 0;
 }
 
+/**
+ * DPDK callback to get rte_tm callbacks.
+ *
+ * @param dev
+ *   Pointer to the device structure.
+ * @param ops
+ *   Pointer to pass the tm ops.
+ *
+ * @return
+ *   Always 0.
+ */
+static int
+mrvl_tm_ops_get(struct rte_eth_dev *dev __rte_unused, void *ops)
+{
+	*(const void **)ops = &mrvl_tm_ops;
+
+	return 0;
+}
+
 static const struct eth_dev_ops mrvl_ops = {
 	.dev_configure = mrvl_dev_configure,
 	.dev_start = mrvl_dev_start,
@@ -2191,7 +2216,8 @@ static const struct eth_dev_ops mrvl_ops = {
 	.filter_ctrl = mrvl_eth_filter_ctrl,
 	.xstats_get_by_id = mrvl_xstats_get_by_id,
 	.xstats_get_names_by_id = mrvl_xstats_get_names_by_id,
-	.mtr_ops_get = mrvl_mtr_ops_get
+	.mtr_ops_get = mrvl_mtr_ops_get,
+	.tm_ops_get = mrvl_tm_ops_get,
 };
 
 /**
