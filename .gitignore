@@ -12,3 +12,16 @@ GPATH
 GRTAGS
 tags
 TAGS
+arm64-armv8a-linuxapp-gcc/
+build/
+*.IAB
+*.IAD
+*.IMB
+*.IMD
+*.PFI
+*.PO
+*.PR
+*.PRI
+*.PS
+*.SearchResults
+*.WK3
