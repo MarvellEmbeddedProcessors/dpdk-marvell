@@ -57,6 +57,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <rte_mvep_common.h>
 #include "mrvl_ethdev.h"
 #include "mrvl_qos.h"
 
@@ -88,9 +89,6 @@
 #define MRVL_COOKIE_ADDR_INVALID ~0ULL
 #define MRVL_COOKIE_HIGH_ADDR_MASK (0xffffff0000000000)
 
-
-/* Memory size (in bytes) for MUSDK dma buffers */
-#define MRVL_MUSDK_DMA_MEMSIZE 41943040
 
 /** Port Rx offload capabilities */
 #define MRVL_RX_OFFLOADS (DEV_RX_OFFLOAD_VLAN_FILTER | \
@@ -2925,23 +2923,16 @@ rte_pmd_mrvl_probe(struct rte_vdev_device *vdev)
 		goto init_devices;
 
 	RTE_LOG(INFO, PMD, "Perform MUSDK initializations\n");
-	/*
-	 * ret == -EEXIST is correct, it means DMA
-	 * has been already initialized (by another PMD).
-	 */
-	ret = mv_sys_dma_mem_init(MRVL_MUSDK_DMA_MEMSIZE);
-	if (ret < 0) {
-		if (ret != -EEXIST)
-			goto out_free_kvlist;
-		else
-			RTE_LOG(INFO, PMD,
-				"DMA memory has been already initialized by a different driver.\n");
-	}
+
+	ret = rte_mvep_init(MVEP_MOD_T_PP2, kvlist);
+	if (ret)
+		goto out_free_kvlist;
 
 	ret = mrvl_init_pp2();
 	if (ret) {
 		RTE_LOG(ERR, PMD, "Failed to init PP!\n");
-		goto out_deinit_dma;
+		rte_mvep_deinit(MVEP_MOD_T_PP2);
+		goto out_free_kvlist;
 	}
 
 	memset(mrvl_port_bpool_size, 0, sizeof(mrvl_port_bpool_size));
@@ -2966,11 +2957,10 @@ out_cleanup:
 	for (; i > 0; i--)
 		mrvl_eth_dev_destroy(ifnames.names[i]);
 
-	if (mrvl_dev_num == 0)
+	if (mrvl_dev_num == 0) {
 		mrvl_deinit_pp2();
-out_deinit_dma:
-	if (mrvl_dev_num == 0)
-		mv_sys_dma_mem_destroy();
+		rte_mvep_deinit(MVEP_MOD_T_PP2);
+	}
 out_free_kvlist:
 	rte_kvargs_free(kvlist);
 
@@ -3010,7 +3000,7 @@ rte_pmd_mrvl_remove(struct rte_vdev_device *vdev)
 		RTE_LOG(INFO, PMD, "Perform MUSDK deinit\n");
 		mrvl_deinit_hifs();
 		mrvl_deinit_pp2();
-		mv_sys_dma_mem_destroy();
+		rte_mvep_deinit(MVEP_MOD_T_PP2);
 	}
 
 	return 0;

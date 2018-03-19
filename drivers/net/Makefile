@@ -59,6 +59,9 @@ ifeq ($(CONFIG_RTE_LIBRTE_MRVL_PMD),y)
 ifeq ($(CONFIG_RTE_LIBRTE_CFGFILE),n)
 $(error "RTE_LIBRTE_CFGFILE must be enabled in configuration!")
 endif
+ifeq ($(CONFIG_RTE_LIBRTE_MVEP_COMMON),n)
+$(error "RTE_LIBRTE_MVEP_COMMON must be enabled in configuration!")
+endif
 endif
 
 include $(RTE_SDK)/mk/rte.subdir.mk
