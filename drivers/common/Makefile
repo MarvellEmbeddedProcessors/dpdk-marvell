@@ -3,4 +3,6 @@
 
 include $(RTE_SDK)/mk/rte.vars.mk
 
+DIRS-$(CONFIG_RTE_LIBRTE_MVEP_COMMON) += mvep
+
 include $(RTE_SDK)/mk/rte.subdir.mk
