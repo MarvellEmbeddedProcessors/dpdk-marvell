@@ -285,18 +285,33 @@ mvneta_sent_buffers_free(struct neta_ppio *ppio,
  *   Array of rx descriptors
  */
 static void
-mvneta_rx_queue_flush(struct neta_rxq *rxq, struct neta_ppio_desc *descs)
+mvneta_rx_queue_flush(struct neta_rxq *rxq)
 {
-	int ret, num;
+	struct neta_ppio_desc descs[MRVL_NETA_RXD_MAX];
+	struct neta_buff_inf  bufs[MRVL_NETA_RXD_MAX];
+	uint64_t addr;
+	uint16_t num;
+	int ret, i;
 
 	do {
 		num = MRVL_NETA_RXD_MAX;
 		ret = neta_ppio_recv(rxq->priv->ppio,
 					rxq->queue_id,
-					descs, (uint16_t *)&num);
+					descs, &num);
 		mvneta_recv_buffs_free(descs, num);
 		rxq->pkts_processed += num;
 	} while (ret == 0 && num);
+
+	num = MRVL_NETA_RXD_MAX;
+	neta_ppio_inq_get_all_buffs(rxq->priv->ppio, rxq->queue_id,
+				    bufs, (uint16_t *)&num);
+	for (i = 0; i < num; i++) {
+		if (bufs[i].cookie) {
+			addr = cookie_addr_high | bufs[i].cookie;
+			rte_pktmbuf_free((struct rte_mbuf *)addr);
+		}
+	}
+	rxq->pkts_processed += num;
 }
 
 /**
@@ -1021,9 +1036,8 @@ mvneta_dev_stop(struct rte_eth_dev *dev)
 	RTE_LOG(INFO, PMD, "Flushing rx queues\n");
 	for (i = 0; i < dev->data->nb_rx_queues; i++) {
 		struct neta_rxq *rxq = dev->data->rx_queues[i];
-		struct neta_ppio_desc descs[MRVL_NETA_RXD_MAX];
 
-		mvneta_rx_queue_flush(rxq, descs);
+		mvneta_rx_queue_flush(rxq);
 	}
 
 	RTE_LOG(INFO, PMD, "Flushing tx queues\n");
