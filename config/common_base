@@ -395,6 +395,11 @@ CONFIG_RTE_LIBRTE_MVPP2_PMD=y
 CONFIG_RTE_LIBRTE_MVGIU_PMD=y
 
 #
+# Compile Marvell MVNETA PMD driver
+#
+CONFIG_RTE_LIBRTE_MVNETA_PMD=n
+
+#
 # Compile virtual device driver for NetVSC on Hyper-V/Azure
 #
 CONFIG_RTE_LIBRTE_VDEV_NETVSC_PMD=n

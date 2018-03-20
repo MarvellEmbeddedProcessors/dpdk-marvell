@@ -140,6 +140,10 @@ The following options can be modified in the ``config`` file.
 
     Toggle compilation of the librte mvpp2 driver.
 
+- ``CONFIG_RTE_LIBRTE_MVNETA_PMD`` (default ``n``)
+
+    Toggle compilation of the librte_pmd_mvneta driver.
+
 
 QoS Configuration
 -----------------
