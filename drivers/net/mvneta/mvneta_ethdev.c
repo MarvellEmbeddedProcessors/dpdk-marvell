@@ -563,9 +563,10 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 		/* drop packet in case of mac, overrun or resource error */
 		status = neta_ppio_inq_desc_get_l2_pkt_error(&descs[i]);
 		if (unlikely(status != NETA_DESC_ERR_OK)) {
-			/* TODO do we need to release it to mempool here? or */
-			/* if we resettet it shall it be reused and free     */
-			/* when dev_stop? */
+			/* Release the mbuf to the mempool since
+			 * it won't be transferred to tx path
+			 */
+			rte_pktmbuf_free(mbuf);
 			q->drop_mac++;
 			continue;
 		}
