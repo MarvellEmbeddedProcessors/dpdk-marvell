@@ -114,8 +114,6 @@ struct neta_rxq {
 	uint64_t bytes_recv;
 	uint64_t drop_mac;
 	uint64_t pkts_processed;
-	/* Virtual address of the RX DMA descriptors array */
-	struct neta_ppio_desc *descs;
 };
 
 
@@ -584,10 +582,7 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 		mbuf->l2_len = l3_offset;
 		mbuf->l3_len = l4_offset - l3_offset;
 
-		/* TODO recv checksum */
-/*		if (likely(q->cksum_enabled))
-*			mbuf->ol_flags = mrvl_desc_to_ol_flags(&descs[i]);
-			 */
+		/* TODO set here offloads&recv checksum */
 
 		rx_pkts[rx_done++] = mbuf;
 		q->bytes_recv += mbuf->pkt_len;
@@ -735,7 +730,6 @@ static int
 mvneta_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 {
 	struct neta_priv *priv = dev->data->dev_private;
-	/* extra MV_MH_SIZE bytes are required for Marvell tag */
 	uint16_t mru = MRVL_NETA_MTU_TO_MRU(mtu);
 
 	if (mtu < ETHER_MIN_MTU || mru > MVNETA_PKT_SIZE_MAX) {
@@ -997,23 +991,8 @@ mvneta_dev_start(struct rte_eth_dev *dev)
 	}
 
 	/* start tx queues */
-	for (i = 0; i < dev->data->nb_tx_queues; i++) {
-		struct neta_txq *txq = dev->data->tx_queues[i];
-
+	for (i = 0; i < dev->data->nb_tx_queues; i++)
 		dev->data->tx_queue_state[i] = RTE_ETH_QUEUE_STATE_STARTED;
-
-		if (!txq->tx_deferred_start)
-			continue;
-
-		/*
-		 * All txqs are started by default. Stop them
-		 * so that tx_deferred_start works as expected.
-		 */
-		/* ret = mrvlna_tx_queue_stop(dev, i);
-		 *if (ret)
-		 *	goto out;
-		 */
-	}
 
 	return 0;
 
@@ -1044,7 +1023,6 @@ mvneta_dev_stop(struct rte_eth_dev *dev)
 		struct neta_ppio_desc descs[MRVL_NETA_RXD_MAX];
 
 		mvneta_rx_queue_flush(rxq, descs);
-		mvneta_rx_queue_release(rxq);
 	}
 
 	RTE_LOG(INFO, PMD, "Flushing tx queues\n");
@@ -1052,12 +1030,11 @@ mvneta_dev_stop(struct rte_eth_dev *dev)
 		struct neta_txq *txq = dev->data->tx_queues[i];
 
 		mvneta_tx_queue_flush(txq);
-		mvneta_tx_queue_release(txq);
 	}
 
 	neta_ppio_deinit(priv->ppio);
 
-	priv = NULL;
+	priv->ppio = NULL;
 }
 
 /**
