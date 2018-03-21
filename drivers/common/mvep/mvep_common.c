@@ -17,11 +17,6 @@
 /* NMP Guest Timeout (ms)*/
 #define NMP_GUEST_TIMEOUT	1000
 
-/* TODO - remove once giu will be serialized in the standard way */
-#define REGFILE_VAR_DIR         "/var/"
-#define REGFILE_NAME_PREFIX     "nic-pf-"
-#define REGFILE_MAX_FILE_NAME   64
-
 int mvep_common_logtype;
 
 #define MVEP_COMMON_LOG(level, fmt, args...) \

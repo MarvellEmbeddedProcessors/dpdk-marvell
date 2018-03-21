@@ -390,6 +390,11 @@ CONFIG_RTE_LIBRTE_MVEP_COMMON=y
 CONFIG_RTE_LIBRTE_MVPP2_PMD=y
 
 #
+# Compile Marvell GIU PMD driver
+#
+CONFIG_RTE_LIBRTE_MVGIU_PMD=y
+
+#
 # Compile virtual device driver for NetVSC on Hyper-V/Azure
 #
 CONFIG_RTE_LIBRTE_VDEV_NETVSC_PMD=n

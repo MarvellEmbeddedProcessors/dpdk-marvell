@@ -7,6 +7,11 @@
 
 #include <rte_kvargs.h>
 
+/* TODO - remove once giu will be serialized in the standard way */
+#define REGFILE_VAR_DIR         "/var/"
+#define REGFILE_NAME_PREFIX     "nic-pf-"
+#define REGFILE_MAX_FILE_NAME   64
+
 enum mvep_module_type {
 	MVEP_MOD_T_NONE = 0,
 	MVEP_MOD_T_PP2,
