@@ -41,7 +41,7 @@ endif
 endif
 
 # library name
-LIB = librte_pmd_mrvl_crypto.a
+LIB = librte_pmd_mvsam_crypto.a
 
 # build flags
 CFLAGS += -O3
@@ -61,7 +61,7 @@ LDLIBS += -L$(LIBMUSDK_PATH)/lib -lmusdk
 LDLIBS += -lrte_bus_vdev
 
 # library source files
-SRCS-$(CONFIG_RTE_LIBRTE_PMD_MRVL_CRYPTO) += rte_mrvl_pmd.c
-SRCS-$(CONFIG_RTE_LIBRTE_PMD_MRVL_CRYPTO) += rte_mrvl_pmd_ops.c
+SRCS-$(CONFIG_RTE_LIBRTE_PMD_MVSAM_CRYPTO) += rte_mrvl_pmd.c
+SRCS-$(CONFIG_RTE_LIBRTE_PMD_MVSAM_CRYPTO) += rte_mrvl_pmd_ops.c
 
 include $(RTE_SDK)/mk/rte.lib.mk

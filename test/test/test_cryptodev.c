@@ -319,8 +319,8 @@ testsuite_setup(void)
 	/* Create a MRVL device if required */
 	if (gbl_driver_id == rte_cryptodev_driver_id_get(
 			RTE_STR(CRYPTODEV_MRVL_PMD))) {
-#ifndef RTE_LIBRTE_PMD_MRVL_CRYPTO
-		RTE_LOG(ERR, USER1, "CONFIG_RTE_LIBRTE_PMD_MRVL_CRYPTO must be"
+#ifndef RTE_LIBRTE_PMD_MVSAM_CRYPTO
+		RTE_LOG(ERR, USER1, "CONFIG_RTE_LIBRTE_PMD_MVSAM_CRYPTO must be"
 			" enabled in config file to run this testsuite.\n");
 		return TEST_FAILED;
 #endif
