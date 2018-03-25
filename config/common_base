@@ -387,7 +387,7 @@ CONFIG_RTE_LIBRTE_MVEP_COMMON=y
 #
 # Compile Marvell PMD driver
 #
-CONFIG_RTE_LIBRTE_MRVL_PMD=y
+CONFIG_RTE_LIBRTE_MVPP2_PMD=y
 
 #
 # Compile virtual device driver for NetVSC on Hyper-V/Azure
