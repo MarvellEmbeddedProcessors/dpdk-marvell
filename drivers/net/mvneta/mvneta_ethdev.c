@@ -1153,6 +1153,22 @@ mvneta_dev_start(struct rte_eth_dev *dev)
 	}
 	priv->ppio_id = priv->ppio->port_id;
 
+	/*
+	 * In case there are some some stale uc/mc mac addresses flush them
+	 * here. It cannot be done during mvneta_dev_close() as port information
+	 * is already gone at that point (due to neta_ppio_deinit() in
+	 * mvneta_dev_stop()).
+	 */
+	if (!priv->uc_mc_flushed) {
+		ret = neta_ppio_flush_mac_addrs(priv->ppio, 0, 1);
+		if (ret) {
+			RTE_LOG(ERR, PMD,
+				"Failed to flush uc/mc filter list\n");
+			goto out;
+		}
+		priv->uc_mc_flushed = 1;
+	}
+
 	/* Allocate buffers */
 	for (i = 0; i < dev->data->nb_rx_queues; i++) {
 		struct mvneta_rxq *rxq = dev->data->rx_queues[i];
