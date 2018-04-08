@@ -1285,6 +1285,58 @@ mvneta_link_update(struct rte_eth_dev *dev, int wait_to_complete __rte_unused)
 	return 0;
 }
 
+/**
+ * DPDK callback to enable promiscuous mode.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mvneta_promiscuous_enable(struct rte_eth_dev *dev)
+{
+	struct mvneta_priv *priv = dev->data->dev_private;
+	int ret, en;
+
+	if (!priv->ppio)
+		return;
+
+	neta_ppio_get_promisc(priv->ppio, &en);
+	if (en) {
+		RTE_LOG(INFO, PMD, "Promiscuous already enabled\n");
+		return;
+	}
+
+	ret = neta_ppio_set_promisc(priv->ppio, 1);
+	if (ret)
+		RTE_LOG(ERR, PMD, "Failed to enable promiscuous mode\n");
+}
+
+/**
+ * DPDK callback to disable allmulticast mode.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mvneta_promiscuous_disable(struct rte_eth_dev *dev)
+{
+	struct mvneta_priv *priv = dev->data->dev_private;
+	int ret, en;
+
+	if (!priv->ppio)
+		return;
+
+	neta_ppio_get_promisc(priv->ppio, &en);
+	if (!en) {
+		RTE_LOG(INFO, PMD, "Promiscuous already disabled\n");
+		return;
+	}
+
+	ret = neta_ppio_set_promisc(priv->ppio, 0);
+	if (ret)
+		RTE_LOG(ERR, PMD, "Failed to disable promiscuous mode\n");
+}
+
 static const struct eth_dev_ops mvneta_ops = {
 	.dev_configure = mvneta_dev_configure,
 	.dev_start = mvneta_dev_start,
@@ -1292,6 +1344,8 @@ static const struct eth_dev_ops mvneta_ops = {
 	.dev_set_link_up = mvneta_dev_set_link_up,
 	.dev_set_link_down = mvneta_dev_set_link_down,
 	.link_update = mvneta_link_update,
+	.promiscuous_enable = mvneta_promiscuous_enable,
+	.promiscuous_disable = mvneta_promiscuous_disable,
 	.mtu_set = mvneta_mtu_set,
 	.dev_infos_get = mvneta_dev_infos_get,
 	.rxq_info_get = mvneta_rxq_info_get,
