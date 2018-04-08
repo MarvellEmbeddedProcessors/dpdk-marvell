@@ -24,8 +24,7 @@
 #include "mvneta_ethdev.h"
 
 
-#define MRVL_IFACE_NAME_ARG "iface"
-#define MRVL_CFG_ARG "cfg"
+#define MVNETA_IFACE_NAME_ARG "iface"
 
 #define MVNETA_COOKIE_ADDR_INVALID ~0ULL
 
@@ -47,7 +46,7 @@ uint64_t cookie_addr_high = MVNETA_COOKIE_ADDR_INVALID;
 uint16_t rx_desc_free_thresh = MRVL_NETA_BUF_RELEASE_BURST_SIZE;
 
 static const char * const valid_args[] = {
-	MRVL_IFACE_NAME_ARG,
+	MVNETA_IFACE_NAME_ARG,
 	NULL
 };
 
@@ -430,9 +429,9 @@ mvneta_desc_to_packet_type_and_offset(struct neta_ppio_desc *desc,
  * @param packet_type
  *   Packet type bitfield.
  * @param l3_type
- *   Pointer to the pp2_ouq_l3_type structure.
+ *   Pointer to the neta_ouq_l3_type structure.
  * @param l4_type
- *   Pointer to the pp2_outq_l4_type structure.
+ *   Pointer to the neta_outq_l4_type structure.
  * @param gen_l3_cksum
  *   Will be set to 1 in case l3 checksum is computed.
  * @param l4_cksum
@@ -1317,12 +1316,12 @@ rte_pmd_mvneta_probe(struct rte_vdev_device *vdev)
 	if (!kvlist)
 		return -EINVAL;
 
-	ifnum = rte_kvargs_count(kvlist, MRVL_IFACE_NAME_ARG);
+	ifnum = rte_kvargs_count(kvlist, MVNETA_IFACE_NAME_ARG);
 	if (ifnum > RTE_DIM(ifnames.names))
 		goto out_free_kvlist;
 
 	ifnames.idx = 0;
-	rte_kvargs_process(kvlist, MRVL_IFACE_NAME_ARG,
+	rte_kvargs_process(kvlist, MVNETA_IFACE_NAME_ARG,
 			   mvneta_ifnames_get, &ifnames);
 
 	/*
