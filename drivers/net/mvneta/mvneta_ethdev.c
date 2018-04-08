@@ -844,6 +844,8 @@ mvneta_dev_infos_get(struct rte_eth_dev *dev __rte_unused,
 	/* By default packets are dropped if no descriptors are available */
 	info->default_rxconf.rx_drop_en = 1;
 	info->default_rxconf.offloads = DEV_RX_OFFLOAD_CRC_STRIP;
+	/* Deferred tx queue start is not supported */
+	info->default_txconf.tx_deferred_start = 0;
 
 	info->max_rx_pktlen = MVNETA_PKT_SIZE_MAX;
 }
