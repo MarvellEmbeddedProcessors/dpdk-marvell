@@ -59,7 +59,7 @@
 #define MRVL_NETA_MRU_TO_MTU(mru) \
 	((mru) - MV_MH_SIZE - ETHER_HDR_LEN + ETHER_CRC_LEN)
 
-struct neta_priv {
+struct mvneta_priv {
 	/* Hot fields, used in fast path. */
 	struct neta_ppio	*ppio;    /**< Port handler pointer */
 
