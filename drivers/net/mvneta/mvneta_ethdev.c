@@ -33,6 +33,15 @@
 
 #define MVNETA_MUSDK_DMA_MEMSIZE 41943040 /* (40 * 1024 * 1024) */
 
+#define MVNETA_RX_OFFLOADS (DEV_RX_OFFLOAD_JUMBO_FRAME | \
+			  DEV_RX_OFFLOAD_CRC_STRIP | \
+			  DEV_RX_OFFLOAD_CHECKSUM)
+
+/** Port Tx offloads capabilities */
+#define MVNETA_TX_OFFLOADS (DEV_TX_OFFLOAD_IPV4_CKSUM | \
+			  DEV_TX_OFFLOAD_UDP_CKSUM | \
+			  DEV_TX_OFFLOAD_TCP_CKSUM)
+
 #define MVNETA_PKT_SIZE_MAX (16382 - MV_MH_SIZE) /* 9700B */
 #define MVNETA_DEFAULT_MTU	1500
 
@@ -363,6 +372,42 @@ mvneta_ifnames_get(const char *key __rte_unused, const char *value,
 	ifnames->names[ifnames->idx++] = value;
 
 	return 0;
+}
+
+/**
+ * Check whether requested rx queue offloads match port offloads.
+ *
+ * @param
+ *   dev Pointer to the device.
+ * @param
+ *   requested Bitmap of the requested offloads.
+ *
+ * @return
+ *   1 if requested offloads are okay, 0 otherwise.
+ */
+static int
+mvneta_rx_queue_offloads_okay(struct rte_eth_dev *dev, uint64_t requested)
+{
+	uint64_t mandatory = dev->data->dev_conf.rxmode.offloads;
+	uint64_t supported = MVNETA_RX_OFFLOADS;
+	uint64_t unsupported = requested & ~supported;
+	uint64_t missing = mandatory & ~requested;
+
+	if (unsupported) {
+		RTE_LOG(ERR, PMD, "Some Rx offloads are not supported. "
+			"Requested 0x%" PRIx64 " supported 0x%" PRIx64 ".\n",
+			requested, supported);
+		return 0;
+	}
+
+	if (missing) {
+		RTE_LOG(ERR, PMD, "Some Rx offloads are missing. "
+			"Requested 0x%" PRIx64 " missing 0x%" PRIx64 ".\n",
+			requested, missing);
+		return 0;
+	}
+
+	return 1;
 }
 
 /**
@@ -717,13 +762,13 @@ mvneta_dev_configure(struct rte_eth_dev *dev)
 		return -EINVAL;
 	}
 
-	if (!dev->data->dev_conf.rxmode.hw_strip_crc) {
+	if (!(dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_CRC_STRIP)) {
 		RTE_LOG(INFO, PMD,
 			"L2 CRC stripping is always enabled in hw\n");
-		dev->data->dev_conf.rxmode.hw_strip_crc = 1;
+		dev->data->dev_conf.rxmode.offloads |= DEV_RX_OFFLOAD_CRC_STRIP;
 	}
 
-	if (dev->data->dev_conf.rxmode.hw_vlan_strip) {
+	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_VLAN_STRIP) {
 		RTE_LOG(INFO, PMD, "VLAN stripping not supported\n");
 		return -EINVAL;
 	}
@@ -733,17 +778,17 @@ mvneta_dev_configure(struct rte_eth_dev *dev)
 		return -EINVAL;
 	}
 
-	if (dev->data->dev_conf.rxmode.enable_scatter) {
+	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_SCATTER) {
 		RTE_LOG(INFO, PMD, "RX Scatter/Gather not supported\n");
 		return -EINVAL;
 	}
 
-	if (dev->data->dev_conf.rxmode.enable_lro) {
+	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_TCP_LRO) {
 		RTE_LOG(INFO, PMD, "LRO not supported\n");
 		return -EINVAL;
 	}
 
-	if (dev->data->dev_conf.rxmode.jumbo_frame)
+	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_JUMBO_FRAME)
 		dev->data->mtu = dev->data->dev_conf.rxmode.max_rx_pkt_len -
 				 ETHER_HDR_LEN - ETHER_CRC_LEN;
 
@@ -790,17 +835,15 @@ mvneta_dev_infos_get(struct rte_eth_dev *dev __rte_unused,
 	info->tx_desc_lim.nb_min = MRVL_NETA_TXD_MIN;
 	info->tx_desc_lim.nb_align = MRVL_NETA_TXD_ALIGN;
 
-	info->rx_offload_capa = DEV_RX_OFFLOAD_JUMBO_FRAME |
-				DEV_RX_OFFLOAD_IPV4_CKSUM |
-				DEV_RX_OFFLOAD_UDP_CKSUM |
-				DEV_RX_OFFLOAD_TCP_CKSUM;
+	info->rx_offload_capa = MVNETA_RX_OFFLOADS;
+	info->rx_queue_offload_capa = MVNETA_RX_OFFLOADS;
 
-	info->tx_offload_capa = DEV_TX_OFFLOAD_IPV4_CKSUM |
-				DEV_TX_OFFLOAD_UDP_CKSUM |
-				DEV_TX_OFFLOAD_TCP_CKSUM;
+	info->tx_offload_capa =  MVNETA_TX_OFFLOADS;
+	info->tx_queue_offload_capa =  MVNETA_TX_OFFLOADS;
 
 	/* By default packets are dropped if no descriptors are available */
 	info->default_rxconf.rx_drop_en = 1;
+	info->default_rxconf.offloads = DEV_RX_OFFLOAD_CRC_STRIP;
 
 	info->max_rx_pktlen = MVNETA_PKT_SIZE_MAX;
 }
@@ -919,16 +962,20 @@ mvneta_dev_set_link_down(struct rte_eth_dev *dev)
 static int
 mvneta_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 		    unsigned int socket,
-		    const struct rte_eth_rxconf *conf __rte_unused,
+		    const struct rte_eth_rxconf *conf,
 		    struct rte_mempool *mp)
 {
 	struct mvneta_priv *priv = dev->data->dev_private;
 	struct mvneta_rxq *rxq;
-	uint32_t min_size,
-		 max_rx_pkt_len = dev->data->dev_conf.rxmode.max_rx_pkt_len;
+	uint32_t min_size;
+	uint32_t max_rx_pkt_len = dev->data->dev_conf.rxmode.max_rx_pkt_len;
 
 	min_size = rte_pktmbuf_data_room_size(mp) - RTE_PKTMBUF_HEADROOM -
 		   MVNETA_PKT_EFFEC_OFFS;
+
+	if (!mvneta_rx_queue_offloads_okay(dev, conf->offloads))
+		return -ENOTSUP;
+
 	if (min_size < max_rx_pkt_len) {
 		RTE_LOG(ERR, PMD,
 			"Mbuf size must be increased to %u bytes to hold up to %u bytes of data.\n",
