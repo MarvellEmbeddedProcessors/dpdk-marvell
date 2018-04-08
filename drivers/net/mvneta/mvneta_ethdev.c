@@ -451,6 +451,67 @@ mvneta_desc_to_packet_type_and_offset(struct neta_ppio_desc *desc,
 }
 
 /**
+ * Prepare offload information.
+ *
+ * @param ol_flags
+ *   Offload flags.
+ * @param packet_type
+ *   Packet type bitfield.
+ * @param l3_type
+ *   Pointer to the pp2_ouq_l3_type structure.
+ * @param l4_type
+ *   Pointer to the pp2_outq_l4_type structure.
+ * @param gen_l3_cksum
+ *   Will be set to 1 in case l3 checksum is computed.
+ * @param l4_cksum
+ *   Will be set to 1 in case l4 checksum is computed.
+ *
+ * @return
+ *   0 on success, negative error value otherwise.
+ */
+static inline int
+mvneta_prepare_proto_info(uint64_t ol_flags, uint32_t packet_type,
+			enum neta_outq_l3_type *l3_type,
+			enum neta_outq_l4_type *l4_type,
+			int *gen_l3_cksum,
+			int *gen_l4_cksum)
+{
+	/*
+	 * Based on ol_flags prepare information
+	 * for neta_ppio_outq_desc_set_proto_info() which setups descriptor
+	 * for offloading.
+	 */
+	if (ol_flags & PKT_TX_IPV4) {
+		*l3_type = NETA_OUTQ_L3_TYPE_IPV4;
+		*gen_l3_cksum = ol_flags & PKT_TX_IP_CKSUM ? 1 : 0;
+	} else if (ol_flags & PKT_TX_IPV6) {
+		*l3_type = NETA_OUTQ_L3_TYPE_IPV6;
+		/* no checksum for ipv6 header */
+		*gen_l3_cksum = 0;
+	} else {
+		/* if something different then stop processing */
+		return -1;
+	}
+
+	ol_flags &= PKT_TX_L4_MASK;
+	if ((packet_type & RTE_PTYPE_L4_TCP) &&
+	    ol_flags == PKT_TX_TCP_CKSUM) {
+		*l4_type = NETA_OUTQ_L4_TYPE_TCP;
+		*gen_l4_cksum = 1;
+	} else if ((packet_type & RTE_PTYPE_L4_UDP) &&
+		   ol_flags == PKT_TX_UDP_CKSUM) {
+		*l4_type = NETA_OUTQ_L4_TYPE_UDP;
+		*gen_l4_cksum = 1;
+	} else {
+		*l4_type = NETA_OUTQ_L4_TYPE_OTHER;
+		/* no checksum for other type */
+		*gen_l4_cksum = 0;
+	}
+
+	return 0;
+}
+
+/**
  * DPDK callback for transmit.
  *
  * @param txq
@@ -471,7 +532,7 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 	struct neta_ppio_desc descs[nb_pkts];
 	unsigned int core_id = rte_lcore_id();
 
-	int i, bytes_sent = 0;
+	int i, ret, bytes_sent = 0;
 	uint16_t num, sq_free_size;
 	uint64_t addr;
 
@@ -494,6 +555,9 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 
 	for (i = 0; i < nb_pkts; i++) {
 		struct rte_mbuf *mbuf = tx_pkts[i];
+		int gen_l3_cksum, gen_l4_cksum;
+		enum neta_outq_l3_type l3_type;
+		enum neta_outq_l4_type l4_type;
 
 		sq->ent[sq->head].cookie = (neta_cookie_t)(uint64_t)mbuf;
 		sq->ent[sq->head].addr = rte_mbuf_data_iova_default(mbuf);
@@ -509,7 +573,18 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 
 		bytes_sent += rte_pktmbuf_pkt_len(mbuf);
 
-		/* TODO : prepare & set proto info in the descriptor */
+		ret = mvneta_prepare_proto_info(mbuf->ol_flags,
+						mbuf->packet_type,
+						&l3_type, &l4_type,
+						&gen_l3_cksum,
+						&gen_l4_cksum);
+		if (unlikely(ret))
+			continue;
+
+		neta_ppio_outq_desc_set_proto_info(&descs[i], l3_type, l4_type,
+						   mbuf->l2_len,
+						   mbuf->l2_len + mbuf->l3_len,
+						   gen_l3_cksum, gen_l4_cksum);
 	}
 	num = nb_pkts;
 	neta_ppio_send(q->priv->ppio, q->queue_id, descs, &nb_pkts);
