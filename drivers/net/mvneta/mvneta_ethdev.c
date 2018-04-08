@@ -849,6 +849,44 @@ mvneta_dev_infos_get(struct rte_eth_dev *dev __rte_unused,
 }
 
 /**
+ * DPDK callback to get information about specific receive queue.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param rx_queue_id
+ *   Receive queue index.
+ * @param qinfo
+ *   Receive queue information structure.
+ */
+static void mvneta_rxq_info_get(struct rte_eth_dev *dev, uint16_t rx_queue_id,
+			      struct rte_eth_rxq_info *qinfo)
+{
+	struct mvneta_rxq *q = dev->data->rx_queues[rx_queue_id];
+
+	qinfo->mp = q->mp;
+	qinfo->nb_desc = q->size;
+}
+
+/**
+ * DPDK callback to get information about specific transmit queue.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param tx_queue_id
+ *   Transmit queue index.
+ * @param qinfo
+ *   Transmit queue information structure.
+ */
+static void mvneta_txq_info_get(struct rte_eth_dev *dev, uint16_t tx_queue_id,
+			      struct rte_eth_txq_info *qinfo)
+{
+	struct mvneta_priv *priv = dev->data->dev_private;
+
+	qinfo->nb_desc =
+		priv->ppio_params.outqs_params.outqs_params[tx_queue_id].size;
+}
+
+/**
  * DPDK callback to change the MTU.
  *
  * Setting the MTU affects hardware MRU (packets larger than the MRU
@@ -1256,6 +1294,8 @@ static const struct eth_dev_ops mvneta_ops = {
 	.link_update = mvneta_link_update,
 	.mtu_set = mvneta_mtu_set,
 	.dev_infos_get = mvneta_dev_infos_get,
+	.rxq_info_get = mvneta_rxq_info_get,
+	.txq_info_get = mvneta_txq_info_get,
 	.rx_queue_setup = mvneta_rx_queue_setup,
 	.rx_queue_release = mvneta_rx_queue_release,
 	.tx_queue_setup = mvneta_tx_queue_setup,
