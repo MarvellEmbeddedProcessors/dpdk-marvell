@@ -483,6 +483,36 @@ mvneta_prepare_proto_info(uint64_t ol_flags, uint32_t packet_type,
 }
 
 /**
+ * Get offload information from the received packet descriptor.
+ *
+ * @param desc
+ *   Pointer to the received packet descriptor.
+ *
+ * @return
+ *   Mbuf offload flags.
+ */
+static inline uint64_t
+mvneta_desc_to_ol_flags(struct neta_ppio_desc *desc)
+{
+	uint64_t flags;
+	enum neta_inq_desc_status status;
+
+	status = neta_ppio_inq_desc_get_l3_pkt_error(desc);
+	if (unlikely(status != NETA_DESC_ERR_OK))
+		flags = PKT_RX_IP_CKSUM_BAD;
+	else
+		flags = PKT_RX_IP_CKSUM_GOOD;
+
+	status = neta_ppio_inq_desc_get_l4_pkt_error(desc);
+	if (unlikely(status != NETA_DESC_ERR_OK))
+		flags |= PKT_RX_L4_CKSUM_BAD;
+	else
+		flags |= PKT_RX_L4_CKSUM_GOOD;
+
+	return flags;
+}
+
+/**
  * DPDK callback for transmit.
  *
  * @param txq
@@ -644,7 +674,8 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 		mbuf->l2_len = l3_offset;
 		mbuf->l3_len = l4_offset - l3_offset;
 
-		/* TODO set here offloads&recv checksum */
+		if (likely(q->cksum_enabled))
+			mbuf->ol_flags = mvneta_desc_to_ol_flags(&descs[i]);
 
 		rx_pkts[rx_done++] = mbuf;
 		q->bytes_recv += mbuf->pkt_len;
@@ -918,7 +949,8 @@ mvneta_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 
 	rxq->priv = priv;
 	rxq->mp = mp;
-	rxq->cksum_enabled = dev->data->dev_conf.rxmode.hw_ip_checksum;
+	rxq->cksum_enabled = dev->data->dev_conf.rxmode.offloads &
+			     DEV_RX_OFFLOAD_IPV4_CKSUM;
 	rxq->queue_id = idx;
 	rxq->port_id = dev->data->port_id;
 	rxq->size = desc;
