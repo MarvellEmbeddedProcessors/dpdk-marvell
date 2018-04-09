@@ -31,6 +31,7 @@ Network Interface Controller Drivers
     mlx4
     mlx5
     mvpp2
+    mvneta
     nfp
     octeontx
     qede

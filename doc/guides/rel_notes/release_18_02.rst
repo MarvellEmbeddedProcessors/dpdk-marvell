@@ -128,6 +128,11 @@ New Features
   * Rx/Tx descriptor status
   * Link status update/event
 
+ * **Added a new net driver for Marvell Armada 3k device.**
+
+  Added the new ``mvneta`` net driver for Marvell Armada 3k device. See the
+  :doc:`../nics/mvneta` NIC guide for more details on this new driver.
+
 * **Added feature supports for live migration from vhost-net to vhost-user.**
 
   Added feature supports for vhost-user to make live migration from vhost-net
