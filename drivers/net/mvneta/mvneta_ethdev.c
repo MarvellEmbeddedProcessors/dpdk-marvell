@@ -1258,6 +1258,50 @@ mvneta_dev_stop(struct rte_eth_dev *dev)
 }
 
 /**
+ * DPDK callback to close the device.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mvneta_dev_close(struct rte_eth_dev *dev)
+{
+	struct mvneta_priv *priv = dev->data->dev_private;
+	uint16_t nb_rxq, nb_txq;
+	/* This variable informs us
+	 * if dev_stop was previously called
+	 * and what is left to be cleanup.
+	 */
+	uint8_t mvneta_started = dev->data->dev_started;
+	int i;
+
+	nb_rxq = dev->data->nb_rx_queues;
+	nb_txq = dev->data->nb_tx_queues;
+
+	for (i = 0; i < nb_rxq; i++) {
+		struct mvneta_rxq *rxq = dev->data->rx_queues[i];
+
+		/* If dev_stop was not called previously, flush rx queues */
+		if (mvneta_started)
+			mvneta_rx_queue_flush(rxq);
+		mvneta_rx_queue_release(rxq);
+	}
+
+	for (i = 0; i < nb_txq; i++) {
+		struct mvneta_txq *txq = dev->data->tx_queues[i];
+
+		/* If dev_stop was not called previously, flush tx queues */
+		if (mvneta_started)
+			mvneta_tx_queue_flush(txq);
+		mvneta_tx_queue_release(txq);
+	}
+	if (mvneta_started) {
+		neta_ppio_deinit(priv->ppio);
+		priv->ppio = NULL;
+	}
+}
+
+/**
  * DPDK callback to retrieve physical link information.
  *
  * @param dev
@@ -1477,6 +1521,7 @@ static const struct eth_dev_ops mvneta_ops = {
 	.dev_stop = mvneta_dev_stop,
 	.dev_set_link_up = mvneta_dev_set_link_up,
 	.dev_set_link_down = mvneta_dev_set_link_down,
+	.dev_close = mvneta_dev_close,
 	.link_update = mvneta_link_update,
 	.promiscuous_enable = mvneta_promiscuous_enable,
 	.promiscuous_disable = mvneta_promiscuous_disable,
