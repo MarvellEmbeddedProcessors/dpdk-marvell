@@ -267,31 +267,36 @@ mvneta_sent_buffers_free(struct neta_ppio *ppio,
 static void
 mvneta_rx_queue_flush(struct mvneta_rxq *rxq)
 {
+	struct mvneta_rxq *q = rxq;
 	struct neta_ppio_desc descs[MRVL_NETA_RXD_MAX];
-	struct neta_buff_inf  bufs[MRVL_NETA_RXD_MAX];
-	uint64_t addr;
+	struct neta_buff_inf bufs[MRVL_NETA_RXD_MAX];
+	struct neta_ppio_params *params;
 	uint16_t num;
 	int ret, i;
 
 	do {
 		num = MRVL_NETA_RXD_MAX;
-		ret = neta_ppio_recv(rxq->priv->ppio,
-					rxq->queue_id,
-					descs, &num);
+		ret = neta_ppio_recv(q->priv->ppio,
+				     q->queue_id,
+				     descs, &num);
 		mvneta_recv_buffs_free(descs, num);
 		rxq->pkts_processed += num;
 	} while (ret == 0 && num);
 
-	num = MRVL_NETA_RXD_MAX;
-	neta_ppio_inq_get_all_buffs(rxq->priv->ppio, rxq->queue_id,
-				    bufs, (uint16_t *)&num);
+	params = &q->priv->ppio_params;
+	num = params->inqs_params.tcs_params[MRVL_NETA_DEFAULT_TC].size;
+
+	neta_ppio_inq_get_all_buffs(q->priv->ppio, q->queue_id, bufs, &num);
+	RTE_LOG(INFO, PMD, "%s: freeing %u unused bufs.\n", __func__, num);
+
 	for (i = 0; i < num; i++) {
+		uint64_t addr;
 		if (bufs[i].cookie) {
 			addr = cookie_addr_high | bufs[i].cookie;
 			rte_pktmbuf_free((struct rte_mbuf *)addr);
 		}
 	}
-	rxq->pkts_processed += num;
+
 }
 
 /**
@@ -1059,10 +1064,31 @@ mvneta_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 static void
 mvneta_rx_queue_release(void *rxq)
 {
-	unsigned int core_id = rte_lcore_id();
+	struct mvneta_rxq *q = rxq;
+	struct neta_buff_inf bufs[MRVL_NETA_RXD_MAX];
+	uint16_t num;
+	int i;
 
-	if (core_id == LCORE_ID_ANY)
-		core_id = 0;
+	/* If dev_start was called already, mbufs are already
+	 * returned to mempool and ppio is deinitialized.
+	 * Skip this step.
+	 */
+	if (q->priv->ppio) {
+		struct neta_ppio *ppio = q->priv->ppio;
+		struct neta_ppio_params *params = &q->priv->ppio_params;
+
+		num = params->inqs_params.tcs_params[MRVL_NETA_DEFAULT_TC].size;
+
+		neta_ppio_inq_get_all_buffs(ppio, q->queue_id, bufs, &num);
+		RTE_LOG(INFO, PMD, "%s: freeing %u unused bufs.\n",
+			__func__, num);
+
+		for (i = 0; i < num; i++) {
+			uint64_t addr;
+			addr = cookie_addr_high | bufs[i].cookie;
+			rte_pktmbuf_free((struct rte_mbuf *)addr);
+		}
+	}
 
 	rte_free(rxq);
 }
@@ -1198,8 +1224,6 @@ out:
 	neta_ppio_deinit(priv->ppio);
 	return ret;
 }
-
-
 
 /**
  * DPDK callback to stop the device.
