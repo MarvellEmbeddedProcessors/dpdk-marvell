@@ -314,12 +314,9 @@ mvneta_tx_queue_flush(struct mvneta_txq *txq)
 		struct mvneta_shadow_txq *sq;
 
 		sq = &txq->shadow_txqs[i];
-		if (sq->size) {
-			printf("%s: core %d: shadow size %d, tail %d, head %d\n",
-				__func__, i, sq->size, sq->tail, sq->head);
+		if (sq->size)
 			mvneta_sent_buffers_free(txq->priv->ppio, sq,
 						 txq->queue_id, 1);
-		}
 
 		/* free the rest of them */
 		while (sq->tail != sq->head) {
