@@ -927,11 +927,23 @@ mvneta_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 	if (!priv->ppio)
 		return -EPERM;
 
-	ret = neta_ppio_set_mru(priv->ppio, mru);
-	if (ret)
-		return ret;
+	priv->ppio_params.inqs_params.mtu = mtu;
+	dev->data->mtu = mtu;
 
-	return neta_ppio_set_mtu(priv->ppio, mtu);
+	ret = neta_ppio_set_mru(priv->ppio, mru);
+	if (ret) {
+		RTE_LOG(ERR, PMD, "Failed to change MRU\n");
+		return ret;
+	}
+
+	ret = neta_ppio_set_mtu(priv->ppio, mtu);
+	if (ret) {
+		RTE_LOG(ERR, PMD, "Failed to change MTU\n");
+		return ret;
+	}
+	RTE_LOG(INFO, PMD, "MTU changed to %u, MRU = %u\n", mtu, mru);
+
+	return 0;
 }
 
 /**
