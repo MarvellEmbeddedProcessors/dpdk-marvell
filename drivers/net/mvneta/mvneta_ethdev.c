@@ -909,6 +909,7 @@ mvneta_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 {
 	struct mvneta_priv *priv = dev->data->dev_private;
 	uint16_t mru = MRVL_NETA_MTU_TO_MRU(mtu);
+	int ret;
 
 	if (mtu < ETHER_MIN_MTU || mru > MVNETA_PKT_SIZE_MAX) {
 		RTE_LOG(ERR, PMD, "Invalid MTU [%u] or MRU [%u]\n", mtu, mru);
@@ -918,17 +919,11 @@ mvneta_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 	if (!priv->ppio)
 		return -EPERM;
 
-	/* TODO note this has no effect as mtu set only during initialization */
-	priv->ppio_params.inqs_params.mtu = mtu;
+	ret = neta_ppio_set_mru(priv->ppio, mru);
+	if (ret)
+		return ret;
 
-	/* TODO below functions cause hardware undefined behaviour, */
-	/*ret = neta_ppio_set_mru(priv->ppio, mru);
-	* if (ret)
-	*	return ret;
-
-	* return neta_ppio_set_mtu(priv->ppio, mtu);
-	 */
-	return 0;
+	return neta_ppio_set_mtu(priv->ppio, mtu);
 }
 
 /**
