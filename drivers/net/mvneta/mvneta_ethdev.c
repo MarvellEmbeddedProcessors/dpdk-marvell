@@ -673,7 +673,7 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 {
 	struct mvneta_rxq *q = rxq;
 	struct neta_ppio_desc descs[nb_pkts];
-	int i, ret, rx_done = 0;
+	int i, ret, rx_done = 0, rx_dropped = 0;
 
 	if (unlikely(!q->priv->ppio))
 		return 0;
@@ -706,6 +706,7 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 			 */
 			rte_pktmbuf_free(mbuf);
 			q->drop_mac++;
+			rx_dropped++;
 			continue;
 		}
 
@@ -727,7 +728,7 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 		rx_pkts[rx_done++] = mbuf;
 		q->bytes_recv += mbuf->pkt_len;
 	}
-	q->pkts_processed += rx_done;
+	q->pkts_processed += rx_done + rx_dropped;
 
 	if (q->pkts_processed > rx_desc_free_thresh) {
 		ret = mvneta_buffs_alloc(q->priv, q, rx_desc_free_thresh);
