@@ -855,6 +855,7 @@ mvneta_dev_infos_get(struct rte_eth_dev *dev __rte_unused,
 	info->default_rxconf.offloads = DEV_RX_OFFLOAD_CRC_STRIP;
 	/* Deferred tx queue start is not supported */
 	info->default_txconf.tx_deferred_start = 0;
+	info->default_txconf.txq_flags |= ETH_TXQ_FLAGS_NOMULTSEGS;
 
 	info->max_rx_pktlen = MVNETA_PKT_SIZE_MAX;
 }
