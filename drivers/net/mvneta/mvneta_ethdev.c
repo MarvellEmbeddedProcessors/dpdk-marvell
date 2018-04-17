@@ -120,18 +120,21 @@ static int mvneta_lcore_last;
  *   0 on success, negative error value otherwise.
  */
 static int
-mvneta_buffs_alloc(struct mvneta_priv *priv, struct mvneta_rxq *rxq, int num)
+mvneta_buffs_alloc(struct mvneta_priv *priv, struct mvneta_rxq *rxq, int *num)
 {
 	struct rte_mbuf *mbufs[MRVL_NETA_TXD_MAX];
 	struct neta_buff_inf entries[MRVL_NETA_TXD_MAX];
-	uint16_t nb_desc;
-	int ret, i;
+	uint16_t nb_desc, nb_desc_to_refill;
+	int ret = 0, i;
 
-	nb_desc = num;
+	nb_desc = *num;
+	nb_desc_to_refill = nb_desc;
 	ret = rte_pktmbuf_alloc_bulk(rxq->mp, mbufs, nb_desc);
-	if (ret)
-		RTE_LOG(ERR, PMD,
-				"Failed to allocate %u mbufs.\n", nb_desc);
+	if (ret) {
+		RTE_LOG(ERR, PMD, "Failed to allocate %u mbufs.\n", nb_desc);
+		*num = 0;
+		return ret;
+	}
 
 
 	if (cookie_addr_high == MVNETA_COOKIE_ADDR_INVALID)
@@ -144,6 +147,8 @@ mvneta_buffs_alloc(struct mvneta_priv *priv, struct mvneta_rxq *rxq, int num)
 			RTE_LOG(ERR, PMD,
 				"mbuf virtual addr high 0x%lx out of range\n",
 				(uint64_t)mbufs[i] >> 32);
+			nb_desc = 0;
+			ret = -1;
 			goto out;
 		}
 	}
@@ -154,19 +159,18 @@ mvneta_buffs_alloc(struct mvneta_priv *priv, struct mvneta_rxq *rxq, int num)
 	}
 	ret = neta_ppio_inq_put_buffs(priv->ppio, rxq->queue_id, entries,
 				      &nb_desc);
-	if (ret) {
-		RTE_LOG(ERR, PMD,
-				"Failed to fill rx desc\n");
-		return ret;
+	if (unlikely(ret)) {
+		RTE_LOG(ERR, PMD, "Failed to fill rx desc\n");
+		nb_desc = 0;
 	}
 
-	return 0;
-
 out:
-	for (; i < nb_desc; i++)
+	for (i = nb_desc; i < nb_desc_to_refill; i++)
 		rte_pktmbuf_free(mbufs[i]);
 
-	return -1;
+	*num = nb_desc;
+
+	return ret;
 }
 
 /**
@@ -731,10 +735,12 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 	q->pkts_processed += rx_done + rx_dropped;
 
 	if (q->pkts_processed > rx_desc_free_thresh) {
-		ret = mvneta_buffs_alloc(q->priv, q, rx_desc_free_thresh);
+		int buf_to_refill = rx_desc_free_thresh;
+
+		ret = mvneta_buffs_alloc(q->priv, q, &buf_to_refill);
 		if (ret)
 			RTE_LOG(ERR, PMD, "Refill failed\n");
-		q->pkts_processed -= rx_desc_free_thresh;
+		q->pkts_processed -= buf_to_refill;
 	}
 
 	return rx_done;
@@ -1193,8 +1199,10 @@ mvneta_dev_start(struct rte_eth_dev *dev)
 	/* Allocate buffers */
 	for (i = 0; i < dev->data->nb_rx_queues; i++) {
 		struct mvneta_rxq *rxq = dev->data->rx_queues[i];
-		ret = mvneta_buffs_alloc(priv, rxq, rxq->size);
-		if (ret) {
+		int num = rxq->size;
+
+		ret = mvneta_buffs_alloc(priv, rxq, &num);
+		if (ret || (num != rxq->size)) {
 			rte_free(rxq);
 			return ret;
 		}
