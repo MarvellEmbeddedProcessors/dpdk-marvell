@@ -959,22 +959,11 @@ static int
 mvneta_dev_set_link_up(struct rte_eth_dev *dev)
 {
 	struct mvneta_priv *priv = dev->data->dev_private;
-	int ret;
 
 	if (!priv->ppio)
 		return -EPERM;
 
-	ret = neta_ppio_enable(priv->ppio);
-	if (ret)
-		return ret;
-
-	ret = mvneta_mtu_set(dev, dev->data->mtu);
-	if (ret) {
-		neta_ppio_disable(priv->ppio);
-		return ret;
-	}
-
-	return 0;
+	return neta_ppio_enable(priv->ppio);
 }
 
 /**
@@ -1219,6 +1208,12 @@ mvneta_dev_start(struct rte_eth_dev *dev)
 			rte_free(rxq);
 			return ret;
 		}
+	}
+
+	ret = mvneta_mtu_set(dev, dev->data->mtu);
+	if (ret) {
+		RTE_LOG(ERR, PMD, "Failed to set MTU %d\n", dev->data->mtu);
+		goto out;
 	}
 
 	ret = mvneta_dev_set_link_up(dev);
