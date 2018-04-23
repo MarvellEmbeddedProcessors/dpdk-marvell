@@ -925,10 +925,10 @@ mvneta_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 	}
 
 	if (!priv->ppio)
-		return -EPERM;
+		/* It is OK. New MTU will be set later on mvneta_dev_start */
+		return 0;
 
 	priv->ppio_params.inqs_params.mtu = mtu;
-	dev->data->mtu = mtu;
 
 	ret = neta_ppio_set_mru(priv->ppio, mru);
 	if (ret) {
