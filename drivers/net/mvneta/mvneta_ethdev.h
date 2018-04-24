@@ -50,9 +50,10 @@
 #define MRVL_NETA_TX_SHADOWQ_MASK (MRVL_NETA_TX_SHADOWQ_SIZE - 1)
 
 /** Minimum number of sent buffers to release from shadow queue to BM */
-#define MRVL_NETA_BUF_RELEASE_BURST_SIZE	16
+#define MRVL_NETA_BUF_RELEASE_BURST_SIZE_MIN	16
 
-#define MVRL_NETA_RX_FREE_THRESH (MRVL_NETA_BUF_RELEASE_BURST_SIZE * 2)
+/** Maximum number of sent buffers to release from shadow queue to BM */
+#define MRVL_NETA_BUF_RELEASE_BURST_SIZE_MAX	64
 
 #define MRVL_NETA_MTU_TO_MRU(mtu) \
 	((mtu) + MV_MH_SIZE + ETHER_HDR_LEN + ETHER_CRC_LEN)

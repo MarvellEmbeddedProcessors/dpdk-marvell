@@ -52,7 +52,17 @@
 #define MVNETA_PKT_EFFEC_OFFS (MRVL_NETA_PKT_OFFS + MV_MH_SIZE)
 
 uint64_t cookie_addr_high = MVNETA_COOKIE_ADDR_INVALID;
-uint16_t rx_desc_free_thresh = MRVL_NETA_BUF_RELEASE_BURST_SIZE;
+uint16_t rx_desc_free_thresh = MRVL_NETA_BUF_RELEASE_BURST_SIZE_MIN;
+
+#define MVNETA_SET_COOKIE_HIGH_ADDR(addr) {				\
+	if (unlikely(cookie_addr_high == MVNETA_COOKIE_ADDR_INVALID))	\
+		cookie_addr_high =					\
+			(uint64_t)addr & MVNETA_COOKIE_HIGH_ADDR_MASK;	\
+}
+
+#define MVNETA_CHECK_COOKIE_HIGH_ADDR(addr)			\
+	((likely(cookie_addr_high ==				\
+	((uint64_t)addr & MVNETA_COOKIE_HIGH_ADDR_MASK))) ? 1 : 0)
 
 static const char * const valid_args[] = {
 	MVNETA_IFACE_NAME_ARG,
@@ -110,6 +120,44 @@ static int mvneta_dev_num;
 static int mvneta_lcore_first;
 static int mvneta_lcore_last;
 
+static inline int
+mvneta_buffs_refill(struct mvneta_priv *priv, struct mvneta_rxq *rxq, u16 *num)
+{
+	struct rte_mbuf *mbufs[MRVL_NETA_BUF_RELEASE_BURST_SIZE_MAX];
+	struct neta_buff_inf entries[MRVL_NETA_BUF_RELEASE_BURST_SIZE_MAX];
+	int i, ret;
+	uint16_t nb_desc = *num;
+
+	ret = rte_pktmbuf_alloc_bulk(rxq->mp, mbufs, nb_desc);
+	if (ret) {
+		RTE_LOG(ERR, PMD, "Failed to allocate %u mbufs.\n",
+			nb_desc);
+		*num = 0;
+		return -1;
+	}
+
+	MVNETA_SET_COOKIE_HIGH_ADDR(mbufs[0]);
+
+	for (i = 0; i < nb_desc; i++) {
+		if (unlikely(!MVNETA_CHECK_COOKIE_HIGH_ADDR(mbufs[i]))) {
+			RTE_LOG(ERR, PMD,
+				"mbuf virt high addr 0x%lx out of range 0x%lx\n",
+				(uint64_t)mbufs[i] >> 32,
+				cookie_addr_high >> 32);
+			*num = 0;
+			goto out;
+		}
+		entries[i].addr = rte_mbuf_data_iova_default(mbufs[i]);
+		entries[i].cookie = (neta_cookie_t)(uint64_t)mbufs[i];
+	}
+	neta_ppio_inq_put_buffs(priv->ppio, rxq->queue_id, entries, num);
+
+out:
+	for (i = *num; i < nb_desc; i++)
+		rte_pktmbuf_free(mbufs[i]);
+
+	return 0;
+}
 
 
 /**
@@ -119,56 +167,29 @@ static int mvneta_lcore_last;
  * @return
  *   0 on success, negative error value otherwise.
  */
-static int
+static inline int
 mvneta_buffs_alloc(struct mvneta_priv *priv, struct mvneta_rxq *rxq, int *num)
 {
-	struct rte_mbuf *mbufs[MRVL_NETA_TXD_MAX];
-	struct neta_buff_inf entries[MRVL_NETA_TXD_MAX];
-	uint16_t nb_desc, nb_desc_to_refill;
-	int ret = 0, i;
+	uint16_t nb_desc, nb_desc_burst, sent = 0;
+	int ret = 0;
 
 	nb_desc = *num;
-	nb_desc_to_refill = nb_desc;
-	ret = rte_pktmbuf_alloc_bulk(rxq->mp, mbufs, nb_desc);
-	if (ret) {
-		RTE_LOG(ERR, PMD, "Failed to allocate %u mbufs.\n", nb_desc);
-		*num = 0;
-		return ret;
-	}
 
+	do {
+		nb_desc_burst =
+			(nb_desc < MRVL_NETA_BUF_RELEASE_BURST_SIZE_MAX) ?
+			nb_desc : MRVL_NETA_BUF_RELEASE_BURST_SIZE_MAX;
 
-	if (cookie_addr_high == MVNETA_COOKIE_ADDR_INVALID)
-		cookie_addr_high =
-			(uint64_t)mbufs[0] & MVNETA_COOKIE_HIGH_ADDR_MASK;
+		ret = mvneta_buffs_refill(priv, rxq, &nb_desc_burst);
+		if (unlikely(ret || !nb_desc_burst))
+			break;
 
-	for (i = 0; i < nb_desc; i++) {
-		if (((uint64_t)mbufs[i] & MVNETA_COOKIE_HIGH_ADDR_MASK)
-			!= cookie_addr_high) {
-			RTE_LOG(ERR, PMD,
-				"mbuf virtual addr high 0x%lx out of range\n",
-				(uint64_t)mbufs[i] >> 32);
-			nb_desc = 0;
-			ret = -1;
-			goto out;
-		}
-	}
+		sent += nb_desc_burst;
+		nb_desc -= nb_desc_burst;
 
-	for (i = 0; i < nb_desc; i++) {
-		entries[i].addr = rte_mbuf_data_iova_default(mbufs[i]);
-		entries[i].cookie = (neta_cookie_t)(uint64_t)mbufs[i];
-	}
-	ret = neta_ppio_inq_put_buffs(priv->ppio, rxq->queue_id, entries,
-				      &nb_desc);
-	if (unlikely(ret)) {
-		RTE_LOG(ERR, PMD, "Failed to fill rx desc\n");
-		nb_desc = 0;
-	}
+	} while (nb_desc);
 
-out:
-	for (i = nb_desc; i < nb_desc_to_refill; i++)
-		rte_pktmbuf_free(mbufs[i]);
-
-	*num = nb_desc;
+	*num = sent;
 
 	return ret;
 }
@@ -230,7 +251,7 @@ mvneta_sent_buffers_free(struct neta_ppio *ppio,
 	sq->num_to_release += nb_done;
 
 	if (likely(!force &&
-		   sq->num_to_release < MRVL_NETA_BUF_RELEASE_BURST_SIZE))
+		   sq->num_to_release < MRVL_NETA_BUF_RELEASE_BURST_SIZE_MIN))
 		return;
 
 	nb_done = sq->num_to_release;
@@ -271,10 +292,13 @@ mvneta_sent_buffers_free(struct neta_ppio *ppio,
 static void
 mvneta_rx_queue_flush(struct mvneta_rxq *rxq)
 {
-	struct neta_ppio_desc descs[MRVL_NETA_RXD_MAX];
-	struct neta_buff_inf bufs[MRVL_NETA_RXD_MAX];
+	struct neta_ppio_desc *descs;
+	struct neta_buff_inf *bufs;
 	uint16_t num;
 	int ret, i;
+
+	descs = rte_malloc("rxdesc", MRVL_NETA_RXD_MAX * sizeof(*descs), 0);
+	bufs = rte_malloc("buffs", MRVL_NETA_RXD_MAX * sizeof(*bufs), 0);
 
 	do {
 		num = MRVL_NETA_RXD_MAX;
@@ -299,6 +323,8 @@ mvneta_rx_queue_flush(struct mvneta_rxq *rxq)
 		}
 	}
 
+	rte_free(descs);
+	rte_free(bufs);
 }
 
 /**
