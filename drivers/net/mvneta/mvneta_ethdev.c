@@ -271,26 +271,24 @@ mvneta_sent_buffers_free(struct neta_ppio *ppio,
 static void
 mvneta_rx_queue_flush(struct mvneta_rxq *rxq)
 {
-	struct mvneta_rxq *q = rxq;
 	struct neta_ppio_desc descs[MRVL_NETA_RXD_MAX];
 	struct neta_buff_inf bufs[MRVL_NETA_RXD_MAX];
-	struct neta_ppio_params *params;
 	uint16_t num;
 	int ret, i;
 
 	do {
 		num = MRVL_NETA_RXD_MAX;
-		ret = neta_ppio_recv(q->priv->ppio,
-				     q->queue_id,
+		ret = neta_ppio_recv(rxq->priv->ppio,
+				     rxq->queue_id,
 				     descs, &num);
 		mvneta_recv_buffs_free(descs, num);
-		rxq->pkts_processed += num;
 	} while (ret == 0 && num);
 
-	params = &q->priv->ppio_params;
-	num = params->inqs_params.tcs_params[MRVL_NETA_DEFAULT_TC].size;
+	rxq->pkts_processed = 0;
 
-	neta_ppio_inq_get_all_buffs(q->priv->ppio, q->queue_id, bufs, &num);
+	num = MRVL_NETA_RXD_MAX;
+
+	neta_ppio_inq_get_all_buffs(rxq->priv->ppio, rxq->queue_id, bufs, &num);
 	RTE_LOG(INFO, PMD, "%s: freeing %u unused bufs.\n", __func__, num);
 
 	for (i = 0; i < num; i++) {
@@ -961,7 +959,7 @@ mvneta_dev_set_link_up(struct rte_eth_dev *dev)
 	struct mvneta_priv *priv = dev->data->dev_private;
 
 	if (!priv->ppio)
-		return -EPERM;
+		return 0;
 
 	return neta_ppio_enable(priv->ppio);
 }
@@ -981,7 +979,7 @@ mvneta_dev_set_link_down(struct rte_eth_dev *dev)
 	struct mvneta_priv *priv = dev->data->dev_private;
 
 	if (!priv->ppio)
-		return -EPERM;
+		return 0;
 
 	return neta_ppio_disable(priv->ppio);
 }
@@ -1066,30 +1064,17 @@ static void
 mvneta_rx_queue_release(void *rxq)
 {
 	struct mvneta_rxq *q = rxq;
-	struct neta_buff_inf bufs[MRVL_NETA_RXD_MAX];
-	uint16_t num;
-	int i;
 
-	/* If dev_start was called already, mbufs are already
+	if (!q)
+		return;
+
+	/* If dev_stop was called already, mbufs are already
 	 * returned to mempool and ppio is deinitialized.
 	 * Skip this step.
 	 */
-	if (q->priv->ppio) {
-		struct neta_ppio *ppio = q->priv->ppio;
-		struct neta_ppio_params *params = &q->priv->ppio_params;
 
-		num = params->inqs_params.tcs_params[MRVL_NETA_DEFAULT_TC].size;
-
-		neta_ppio_inq_get_all_buffs(ppio, q->queue_id, bufs, &num);
-		RTE_LOG(INFO, PMD, "%s: freeing %u unused bufs.\n",
-			__func__, num);
-
-		for (i = 0; i < num; i++) {
-			uint64_t addr;
-			addr = cookie_addr_high | bufs[i].cookie;
-			rte_pktmbuf_free((struct rte_mbuf *)addr);
-		}
-	}
+	if (q->priv->ppio)
+		mvneta_rx_queue_flush(q);
 
 	rte_free(rxq);
 }
@@ -1172,6 +1157,9 @@ mvneta_dev_start(struct rte_eth_dev *dev)
 	char match[MVNETA_MATCH_LEN];
 	int ret = 0, i;
 
+	if (priv->ppio)
+		return mvneta_dev_set_link_up(dev);
+
 	snprintf(match, sizeof(match), "eth%d", priv->ppio_id);
 	priv->ppio_params.match = match;
 
@@ -1246,6 +1234,9 @@ mvneta_dev_stop(struct rte_eth_dev *dev)
 	struct mvneta_priv *priv = dev->data->dev_private;
 	int i;
 
+	if (!priv->ppio)
+		return;
+
 	mvneta_dev_set_link_down(dev);
 	RTE_LOG(INFO, PMD, "Flushing rx queues\n");
 	for (i = 0; i < dev->data->nb_rx_queues; i++) {
@@ -1276,37 +1267,19 @@ static void
 mvneta_dev_close(struct rte_eth_dev *dev)
 {
 	struct mvneta_priv *priv = dev->data->dev_private;
-	uint16_t nb_rxq, nb_txq;
-	/* This variable informs us
-	 * if dev_stop was previously called
-	 * and what is left to be cleanup.
-	 */
-	uint8_t mvneta_started = dev->data->dev_started;
 	int i;
 
-	nb_rxq = dev->data->nb_rx_queues;
-	nb_txq = dev->data->nb_tx_queues;
+	if (priv->ppio)
+		mvneta_dev_stop(dev);
 
-	for (i = 0; i < nb_rxq; i++) {
-		struct mvneta_rxq *rxq = dev->data->rx_queues[i];
-
-		/* If dev_stop was not called previously, flush rx queues */
-		if (mvneta_started)
-			mvneta_rx_queue_flush(rxq);
-		mvneta_rx_queue_release(rxq);
+	for (i = 0; i < dev->data->nb_rx_queues; i++) {
+		mvneta_rx_queue_release(dev->data->rx_queues[i]);
+		dev->data->rx_queues[i] = NULL;
 	}
 
-	for (i = 0; i < nb_txq; i++) {
-		struct mvneta_txq *txq = dev->data->tx_queues[i];
-
-		/* If dev_stop was not called previously, flush tx queues */
-		if (mvneta_started)
-			mvneta_tx_queue_flush(txq);
-		mvneta_tx_queue_release(txq);
-	}
-	if (mvneta_started) {
-		neta_ppio_deinit(priv->ppio);
-		priv->ppio = NULL;
+	for (i = 0; i < dev->data->nb_tx_queues; i++) {
+		mvneta_tx_queue_release(dev->data->tx_queues[i]);
+		dev->data->tx_queues[i] = NULL;
 	}
 }
 
