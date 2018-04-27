@@ -777,7 +777,6 @@ mvneta_dev_configure(struct rte_eth_dev *dev)
 {
 	struct mvneta_priv *priv = dev->data->dev_private;
 	struct neta_ppio_params *ppio_params;
-	u16 mtu;
 
 	if (dev->data->dev_conf.rxmode.mq_mode != ETH_MQ_RX_NONE) {
 		RTE_LOG(INFO, PMD, "Unsupported RSS and rx multi queue mode %d\n",
@@ -813,7 +812,7 @@ mvneta_dev_configure(struct rte_eth_dev *dev)
 
 	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_JUMBO_FRAME)
 		dev->data->mtu = dev->data->dev_conf.rxmode.max_rx_pkt_len -
-				 ETHER_HDR_LEN - ETHER_CRC_LEN;
+				 MRVL_NETA_ETH_HDRS_LEN;
 
 	ppio_params = &priv->ppio_params;
 	ppio_params->outqs_params.num_outqs = dev->data->nb_tx_queues;
@@ -822,9 +821,6 @@ mvneta_dev_configure(struct rte_eth_dev *dev)
 	ppio_params->inqs_params.num_tcs = 1;
 	ppio_params->inqs_params.tcs_params[0].pkt_offset = MRVL_NETA_PKT_OFFS;
 	priv->ppio_id = dev->data->port_id;
-	/* TODO check if DPDK has already set mtu to default value */
-	mtu = dev->data->mtu ? dev->data->mtu : MVNETA_DEFAULT_MTU;
-	ppio_params->inqs_params.mtu = mtu;
 
 	return 0;
 }
@@ -930,19 +926,42 @@ static int
 mvneta_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 {
 	struct mvneta_priv *priv = dev->data->dev_private;
-	uint16_t mru = MRVL_NETA_MTU_TO_MRU(mtu);
+	uint16_t mbuf_data_size = 0; /* SW buffer size */
+	uint16_t mru;
 	int ret;
+
+	mru = MRVL_NETA_MTU_TO_MRU(mtu);
+	/*
+	 * min_rx_buf_size is equal to mbuf data size
+	 * if pmd didn't set it differently
+	 */
+	mbuf_data_size = dev->data->min_rx_buf_size - RTE_PKTMBUF_HEADROOM;
+	/* Prevent PMD from:
+	 * - setting mru greater than the mbuf size resulting in
+	 * hw and sw buffer size mismatch
+	 * - setting mtu that requires the support of scattered packets
+	 * when this feature has not been enabled/supported so far.
+	 */
+	if (!dev->data->scattered_rx &&
+	    (mru + MRVL_NETA_PKT_OFFS > mbuf_data_size)) {
+		mru = mbuf_data_size - MRVL_NETA_PKT_OFFS;
+		mtu = MRVL_NETA_MRU_TO_MTU(mru);
+		RTE_LOG(WARNING, PMD, "MTU too big, max MTU possible limitted by"
+			" current mbuf size: %u. Set MTU to %u, MRU to %u\n",
+			mbuf_data_size, mtu, mru);
+	}
 
 	if (mtu < ETHER_MIN_MTU || mru > MVNETA_PKT_SIZE_MAX) {
 		RTE_LOG(ERR, PMD, "Invalid MTU [%u] or MRU [%u]\n", mtu, mru);
 		return -EINVAL;
 	}
 
+	dev->data->mtu = mtu;
+	dev->data->dev_conf.rxmode.max_rx_pkt_len = mru - MV_MH_SIZE;
+
 	if (!priv->ppio)
 		/* It is OK. New MTU will be set later on mvneta_dev_start */
 		return 0;
-
-	priv->ppio_params.inqs_params.mtu = mtu;
 
 	ret = neta_ppio_set_mru(priv->ppio, mru);
 	if (ret) {
@@ -1027,22 +1046,23 @@ mvneta_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 {
 	struct mvneta_priv *priv = dev->data->dev_private;
 	struct mvneta_rxq *rxq;
-	uint32_t min_size;
+	uint32_t frame_size, buf_size = rte_pktmbuf_data_room_size(mp);
 	uint32_t max_rx_pkt_len = dev->data->dev_conf.rxmode.max_rx_pkt_len;
-
-	min_size = rte_pktmbuf_data_room_size(mp) - RTE_PKTMBUF_HEADROOM -
-		   MVNETA_PKT_EFFEC_OFFS;
 
 	if (!mvneta_rx_queue_offloads_okay(dev, conf->offloads))
 		return -ENOTSUP;
 
-	if (min_size < max_rx_pkt_len) {
+	frame_size = buf_size - RTE_PKTMBUF_HEADROOM - MVNETA_PKT_EFFEC_OFFS;
+
+	if (frame_size < max_rx_pkt_len) {
 		RTE_LOG(ERR, PMD,
-			"Mbuf size must be increased to %u bytes to hold up to %u bytes of data.\n",
-			max_rx_pkt_len + RTE_PKTMBUF_HEADROOM +
-			MVNETA_PKT_EFFEC_OFFS,
+			"Mbuf size must be increased to %u bytes to hold up "
+			"to %u bytes of data.\n",
+			buf_size + max_rx_pkt_len - frame_size,
 			max_rx_pkt_len);
-		return -EINVAL;
+		dev->data->dev_conf.rxmode.max_rx_pkt_len = frame_size;
+		RTE_LOG(INFO, PMD, "Setting max rx pkt len to %u\n",
+			dev->data->dev_conf.rxmode.max_rx_pkt_len);
 	}
 
 	if (dev->data->rx_queues[idx]) {
@@ -1178,6 +1198,7 @@ mvneta_dev_start(struct rte_eth_dev *dev)
 
 	snprintf(match, sizeof(match), "eth%d", priv->ppio_id);
 	priv->ppio_params.match = match;
+	priv->ppio_params.inqs_params.mtu = dev->data->mtu;
 
 	ret = neta_ppio_init(&priv->ppio_params, &priv->ppio);
 	if (ret) {
