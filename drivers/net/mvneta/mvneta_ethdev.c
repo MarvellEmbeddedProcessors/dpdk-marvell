@@ -89,7 +89,6 @@ struct mvneta_shadow_txq {
 	int head;           /* write index - used when sending buffers */
 	int tail;           /* read index - used when releasing buffers */
 	u16 size;           /* queue occupied size */
-	u16 num_to_release; /* number of buffers sent, that can be released */
 	struct neta_buff_inf ent[MRVL_NETA_TX_SHADOWQ_SIZE]; /* q entries */
 };
 
@@ -233,7 +232,7 @@ mvneta_recv_buffs_free(struct neta_ppio_desc *desc, uint16_t num)
  */
 static inline void
 mvneta_sent_buffers_free(struct neta_ppio *ppio,
-			 struct mvneta_shadow_txq *sq, int qid, int force)
+			 struct mvneta_shadow_txq *sq, int qid)
 {
 	struct neta_buff_inf *entry;
 	uint16_t nb_done = 0;
@@ -247,15 +246,6 @@ mvneta_sent_buffers_free(struct neta_ppio *ppio,
 			__func__, nb_done, sq->size);
 		return;
 	}
-
-	sq->num_to_release += nb_done;
-
-	if (likely(!force &&
-		   sq->num_to_release < MRVL_NETA_BUF_RELEASE_BURST_SIZE_MIN))
-		return;
-
-	nb_done = sq->num_to_release;
-	sq->num_to_release = 0;
 
 	for (i = 0; i < nb_done; i++) {
 		entry = &sq->ent[tail];
@@ -344,7 +334,7 @@ mvneta_tx_queue_flush(struct mvneta_txq *txq)
 		sq = &txq->shadow_txqs[i];
 		if (sq->size)
 			mvneta_sent_buffers_free(txq->priv->ppio, sq,
-						 txq->queue_id, 1);
+						 txq->queue_id);
 
 		/* free the rest of them */
 		while (sq->tail != sq->head) {
@@ -618,7 +608,7 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 
 	if (sq->size)
 		mvneta_sent_buffers_free(q->priv->ppio,
-				sq, q->queue_id, 0);
+				sq, q->queue_id);
 
 	sq_free_size = MRVL_NETA_TX_SHADOWQ_SIZE - sq->size - 1;
 	if (unlikely(nb_pkts > sq_free_size)) {
