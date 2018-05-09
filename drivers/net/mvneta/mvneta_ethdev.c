@@ -618,7 +618,7 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 	uint64_t addr;
 
 	sq = &q->shadow_txq;
-	if (unlikely(!q->priv->ppio))
+	if (unlikely(!nb_pkts || !q->priv->ppio))
 		return 0;
 
 	if (sq->size)
@@ -835,7 +835,7 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 	struct neta_ppio_desc descs[nb_pkts];
 	int i, ret, rx_done = 0, rx_dropped = 0;
 
-	if (unlikely(!q->priv->ppio))
+	if (unlikely(!q || !q->priv->ppio))
 		return 0;
 
 	ret = neta_ppio_recv(q->priv->ppio, q->queue_id,
