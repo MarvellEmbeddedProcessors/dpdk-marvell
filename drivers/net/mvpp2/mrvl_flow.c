@@ -377,7 +377,8 @@ mrvl_parse_init(const struct rte_flow_item *item,
  *
  * @param spec Pointer to the specific flow item.
  * @param mask Pointer to the specific flow item's mask.
- * @param mask Pointer to the flow.
+ * @param parse_dst Parse either destination or source mac address.
+ * @param flow Pointer to the flow.
  * @return 0 in case of success, negative error value otherwise.
  */
 static int
@@ -596,6 +597,7 @@ mrvl_parse_ip4_dscp(const struct rte_flow_item_ipv4 *spec,
  *
  * @param spec Pointer to the specific flow item.
  * @param mask Pointer to the specific flow item's mask.
+ * @param parse_dst Parse either destination or source ip address.
  * @param flow Pointer to the flow.
  * @return 0 in case of success, negative error value otherwise.
  */
@@ -709,6 +711,7 @@ mrvl_parse_ip4_proto(const struct rte_flow_item_ipv4 *spec,
  *
  * @param spec Pointer to the specific flow item.
  * @param mask Pointer to the specific flow item's mask.
+ * @param parse_dst Parse either destination or source ipv6 address.
  * @param flow Pointer to the flow.
  * @return 0 in case of success, negative error value otherwise.
  */
@@ -857,6 +860,7 @@ mrvl_parse_ip6_next_hdr(const struct rte_flow_item_ipv6 *spec,
  *
  * @param spec Pointer to the specific flow item.
  * @param mask Pointer to the specific flow item's mask.
+ * @param parse_dst Parse either destination or source port.
  * @param flow Pointer to the flow.
  * @return 0 in case of success, negative error value otherwise.
  */
@@ -932,6 +936,7 @@ mrvl_parse_tcp_dport(const struct rte_flow_item_tcp *spec,
  *
  * @param spec Pointer to the specific flow item.
  * @param mask Pointer to the specific flow item's mask.
+ * @param parse_dst Parse either destination or source port.
  * @param flow Pointer to the flow.
  * @return 0 in case of success, negative error value otherwise.
  */
@@ -1005,7 +1010,6 @@ mrvl_parse_udp_dport(const struct rte_flow_item_udp *spec,
  * @param item Pointer to the flow item.
  * @param flow Pointer to the flow.
  * @param error Pointer to the flow error.
- * @param fields Pointer to the parsed parsed fields enum.
  * @returns 0 on success, negative value otherwise.
  */
 static int
@@ -1056,7 +1060,6 @@ out:
  * @param item Pointer to the flow item.
  * @param flow Pointer to the flow.
  * @param error Pointer to the flow error.
- * @param fields Pointer to the parsed parsed fields enum.
  * @returns 0 on success, negative value otherwise.
  */
 static int
@@ -1108,7 +1111,6 @@ out:
  * @param item Pointer to the flow item.
  * @param flow Pointer to the flow.
  * @param error Pointer to the flow error.
- * @param fields Pointer to the parsed parsed fields enum.
  * @returns 0 on success, negative value otherwise.
  */
 static int
@@ -1174,7 +1176,6 @@ out:
  * @param item Pointer to the flow item.
  * @param flow Pointer to the flow.
  * @param error Pointer to the flow error.
- * @param fields Pointer to the parsed parsed fields enum.
  * @returns 0 on success, negative value otherwise.
  */
 static int
@@ -1245,7 +1246,6 @@ out:
  * @param item Pointer to the flow item.
  * @param flow Pointer to the flow.
  * @param error Pointer to the flow error.
- * @param fields Pointer to the parsed parsed fields enum.
  * @returns 0 on success, negative value otherwise.
  */
 static int
@@ -1301,7 +1301,6 @@ out:
  * @param item Pointer to the flow item.
  * @param flow Pointer to the flow.
  * @param error Pointer to the flow error.
- * @param fields Pointer to the parsed parsed fields enum.
  * @returns 0 on success, negative value otherwise.
  */
 static int
@@ -1950,6 +1949,7 @@ mrvl_parse_pattern_ip6_tcp(const struct rte_flow_item pattern[],
  * @param pattern Pointer to the flow pattern table.
  * @param flow Pointer to the flow.
  * @param error Pointer to the flow error.
+ * @param ip6 1 to parse ip6 item, 0 to parse ip4 item.
  * @returns 0 in case of success, negative value otherwise.
  */
 static int
@@ -2224,14 +2224,19 @@ mrvl_flow_parse_actions(struct mrvl_priv *priv,
 			flow->cos.tc = 0;
 			flow->action.type = PP2_CLS_TBL_ACT_DROP;
 			flow->action.cos = &flow->cos;
-
-			return 0;
-		}
-
-		if (action->type == RTE_FLOW_ACTION_TYPE_QUEUE) {
+			specified++;
+		} else if (action->type == RTE_FLOW_ACTION_TYPE_QUEUE) {
 			const struct rte_flow_action_queue *q =
 				(const struct rte_flow_action_queue *)
 				action->conf;
+
+			if (q->index > priv->nb_rx_queues) {
+				rte_flow_error_set(error, EINVAL,
+						RTE_FLOW_ERROR_TYPE_ACTION,
+						NULL,
+						"Queue index out of range");
+				return -rte_errno;
+			}
 
 			if (priv->rxq_map[q->index].tc == MRVL_UNKNOWN_TC) {
 				/*
@@ -2241,12 +2246,18 @@ mrvl_flow_parse_actions(struct mrvl_priv *priv,
 				RTE_LOG(ERR, PMD,
 					"Unknown TC mapping for queue %hu eth%hhu\n",
 					q->index, priv->ppio_id);
-				return -EFAULT;
+
+				rte_flow_error_set(error, EFAULT,
+						RTE_FLOW_ERROR_TYPE_UNSPECIFIED,
+						NULL, NULL);
+				return -rte_errno;
 			}
+
 			RTE_LOG(DEBUG, PMD,
 				"Action: Assign packets to queue %d, tc:%d, q:%d\n",
 				q->index, priv->rxq_map[q->index].tc,
 				priv->rxq_map[q->index].inq);
+
 			flow->cos.ppio = priv->ppio;
 			flow->cos.tc = priv->rxq_map[q->index].tc;
 			flow->action.type = PP2_CLS_TBL_ACT_DONE;
@@ -2303,8 +2314,8 @@ mrvl_flow_parse_actions(struct mrvl_priv *priv,
 
 	if (!specified) {
 		rte_flow_error_set(error, EINVAL,
-				   RTE_FLOW_ERROR_TYPE_UNSPECIFIED, NULL,
-				   "Action not specified");
+				   RTE_FLOW_ERROR_TYPE_UNSPECIFIED,
+				   NULL, "Action not specified");
 		return -rte_errno;
 	}
 
@@ -2343,6 +2354,12 @@ mrvl_flow_parse(struct mrvl_priv *priv, const struct rte_flow_attr *attr,
 	return mrvl_flow_parse_actions(priv, actions, flow, error);
 }
 
+/**
+ * Get engine type for the given flow.
+ *
+ * @param field Pointer to the flow.
+ * @returns The type of the engine.
+ */
 static inline enum pp2_cls_tbl_type
 mrvl_engine_type(const struct rte_flow *flow)
 {
@@ -2362,6 +2379,13 @@ mrvl_engine_type(const struct rte_flow *flow)
 	return PP2_CLS_TBL_MASKABLE;
 }
 
+/**
+ * Create classifier table.
+ *
+ * @param dev Pointer to the device.
+ * @param flow Pointer to the very first flow.
+ * @returns 0 in case of success, negative value otherwise.
+ */
 static int
 mrvl_create_cls_table(struct rte_eth_dev *dev, struct rte_flow *first_flow)
 {
@@ -2654,7 +2678,7 @@ mrvl_flow_remove(struct mrvl_priv *priv, struct rte_flow *flow,
 /**
  * DPDK flow destroy callback called when flow is to be removed.
  *
- * @param priv Pointer to the port's private data.
+ * @param dev Pointer to the device.
  * @param flow Pointer to the flow.
  * @param error Pointer to the flow error.
  * @returns 0 in case of success, negative value otherwise.
