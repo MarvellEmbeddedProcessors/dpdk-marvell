@@ -77,7 +77,9 @@ int rte_mvep_init(enum mvep_module_type module,
 
 	mvep.ref_count++;
 
-	if (module == MVEP_MOD_T_GIU) {
+	switch (module) {
+	case MVEP_MOD_T_GIU:
+	{
 		struct nmp_guest_params nmp_guest_params;
 
 		ret = wait_for_pf_init_done();
@@ -93,6 +95,11 @@ int rte_mvep_init(enum mvep_module_type module,
 
 		nmp_guest_get_probe_str(mvep.nmp_guest, &mvep.guest_prb_str);
 		nmp_guest_get_relations_info(mvep.nmp_guest, &mvep.guest_info);
+		break;
+	}
+	default:
+		MVEP_COMMON_LOG(ERR, "wrong module %d.\n", module);
+		return -EINVAL;
 	}
 
 	return 0;
