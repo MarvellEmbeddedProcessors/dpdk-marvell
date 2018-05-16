@@ -14,8 +14,10 @@
 #include "mv_mvep_config.h"
 #include "rte_mvep_common.h"
 
+#ifdef MVCONF_NMP_BUILT
 /* NMP Guest Timeout (ms)*/
 #define NMP_GUEST_TIMEOUT	1000
+#endif /* MVCONF_NMP_BUILT */
 
 int mvep_common_logtype;
 
@@ -26,14 +28,17 @@ int mvep_common_logtype;
 struct mvep {
 	uint32_t ref_count;
 
+#ifdef MVCONF_NMP_BUILT
 	/* Guest Info */
 	struct nmp_guest *nmp_guest;
 	char *guest_prb_str;
 	struct nmp_guest_info guest_info;
+#endif /* MVCONF_NMP_BUILT */
 };
 
 static struct mvep mvep;
 
+#ifdef MVCONF_NMP_BUILT
 static int wait_for_pf_init_done(void)
 {
 	char	file_name[REGFILE_MAX_FILE_NAME];
@@ -62,6 +67,7 @@ static int wait_for_pf_init_done(void)
 
 	return 0;
 }
+#endif /* MVCONF_NMP_BUILT */
 
 int rte_mvep_init(enum mvep_module_type module,
 		  struct rte_kvargs *kvlist __rte_unused)
@@ -78,6 +84,7 @@ int rte_mvep_init(enum mvep_module_type module,
 	mvep.ref_count++;
 
 	switch (module) {
+#ifdef MVCONF_NMP_BUILT
 	case MVEP_MOD_T_GIU:
 	{
 		struct nmp_guest_params nmp_guest_params;
@@ -97,6 +104,7 @@ int rte_mvep_init(enum mvep_module_type module,
 		nmp_guest_get_relations_info(mvep.nmp_guest, &mvep.guest_info);
 		break;
 	}
+#endif /* MVCONF_NMP_BUILT */
 	default:
 		MVEP_COMMON_LOG(ERR, "wrong module %d.\n", module);
 		return -EINVAL;
@@ -112,10 +120,12 @@ int rte_mvep_deinit(enum mvep_module_type module __rte_unused)
 	if (!mvep.ref_count)
 		mv_sys_dma_mem_destroy();
 
+#ifdef MVCONF_NMP_BUILT
 	if (mvep.nmp_guest) {
 		nmp_guest_deinit(mvep.nmp_guest);
 		mvep.nmp_guest = NULL;
 	}
+#endif /* MVCONF_NMP_BUILT */
 
 	return 0;
 }
