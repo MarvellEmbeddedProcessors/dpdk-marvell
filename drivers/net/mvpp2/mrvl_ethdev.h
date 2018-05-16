@@ -241,6 +241,7 @@ struct mrvl_priv {
 	uint8_t uc_mc_flushed;
 	uint8_t vlan_flushed;
 	uint8_t isolated;
+	uint8_t multiseg;
 	struct mrvl_config init_cfg;
 
 	struct pp2_ppio_params ppio_params;
