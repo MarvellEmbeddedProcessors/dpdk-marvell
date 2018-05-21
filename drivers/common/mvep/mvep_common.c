@@ -9,7 +9,9 @@
 
 #include <env/mv_autogen_comp_flags.h>
 #include <env/mv_sys_dma.h>
+#ifdef MVCONF_NMP_BUILT
 #include <mng/mv_nmp_guest.h>
+#endif
 
 #include "mv_mvep_config.h"
 #include "rte_mvep_common.h"
