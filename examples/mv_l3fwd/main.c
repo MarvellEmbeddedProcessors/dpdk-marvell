@@ -1,4 +1,4 @@
-/*-
+/*
  *   BSD LICENSE
  *
  *   Copyright(c) 2010-2016 Intel Corporation. All rights reserved.
@@ -144,11 +144,9 @@ static struct rte_eth_conf port_conf = {
 		.mq_mode = ETH_MQ_RX_RSS,
 		.max_rx_pkt_len = ETHER_MAX_LEN,
 		.split_hdr_size = 0,
-		.header_split   = 0, /**< Header Split disabled */
-		.hw_ip_checksum = 1, /**< IP checksum offload enabled */
-		.hw_vlan_filter = 0, /**< VLAN filtering disabled */
-		.jumbo_frame    = 0, /**< Jumbo Frame Support disabled */
-		.hw_strip_crc   = 1, /**< CRC stripped by hardware */
+		.ignore_offload_bitfield = 1,
+		.offloads = (DEV_RX_OFFLOAD_CRC_STRIP |
+			     DEV_RX_OFFLOAD_CHECKSUM),
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
@@ -647,7 +645,7 @@ parse_args(int argc, char **argv)
 			};
 
 			printf("%s\n", str8);
-			port_conf.rxmode.jumbo_frame = 1;
+			port_conf.rxmode.offloads |= DEV_RX_OFFLOAD_JUMBO_FRAME;
 
 			/*
 			 * if no max-pkt-len set, use the default
@@ -756,6 +754,10 @@ init_mem(unsigned nb_mbuf, unsigned buf_size)
 				"Socket %d of lcore %u is out of range %d\n",
 				socketid, lcore_id, NB_SOCKETS);
 		}
+
+		if (buf_size < RTE_MBUF_DEFAULT_DATAROOM)
+			buf_size = RTE_MBUF_DEFAULT_DATAROOM;
+		buf_size += RTE_PKTMBUF_HEADROOM;
 
 		if (pktmbuf_pool[socketid] == NULL) {
 			snprintf(s, sizeof(s), "mbuf_pool_%d", socketid);
@@ -933,6 +935,8 @@ main(int argc, char **argv)
 
 	/* initialize all ports */
 	for (portid = 0; portid < nb_ports; portid++) {
+		struct rte_eth_conf local_port_conf = port_conf;
+
 		/* skip ports that are not enabled */
 		if ((enabled_port_mask & (1 << portid)) == 0) {
 			printf("\nSkipping disabled port %d\n", portid);
@@ -949,8 +953,13 @@ main(int argc, char **argv)
 			n_tx_queue = MAX_TX_QUEUE_PER_PORT;
 		printf("Creating queues: nb_rxq=%d nb_txq=%u... ",
 			nb_rx_queue, (unsigned)n_tx_queue);
+
+		rte_eth_dev_info_get(portid, &dev_info);
+		if (dev_info.tx_offload_capa & DEV_TX_OFFLOAD_MBUF_FAST_FREE)
+			local_port_conf.txmode.offloads |=
+				DEV_TX_OFFLOAD_MBUF_FAST_FREE;
 		ret = rte_eth_dev_configure(portid, nb_rx_queue,
-					(uint16_t)n_tx_queue, &port_conf);
+					(uint16_t)n_tx_queue, &local_port_conf);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE,
 				"Cannot configure device: err=%d, port=%d\n",
@@ -998,8 +1007,8 @@ main(int argc, char **argv)
 
 			rte_eth_dev_info_get(portid, &dev_info);
 			txconf = &dev_info.default_txconf;
-			if (port_conf.rxmode.jumbo_frame)
-				txconf->txq_flags = 0;
+			txconf->txq_flags = ETH_TXQ_FLAGS_IGNORE;
+			txconf->offloads = local_port_conf.txmode.offloads;
 			ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
 						     socketid, txconf);
 			if (ret < 0)
@@ -1025,8 +1034,14 @@ main(int argc, char **argv)
 		fflush(stdout);
 		/* init RX queues */
 		for (queue = 0; queue < qconf->n_rx_queue; ++queue) {
+			struct rte_eth_dev *dev;
+			struct rte_eth_conf *conf;
+			struct rte_eth_rxconf rxq_conf;
+
 			portid = qconf->rx_queue_list[queue].port_id;
 			queueid = qconf->rx_queue_list[queue].queue_id;
+			dev = &rte_eth_devices[portid];
+			conf = &dev->data->dev_conf;
 
 			if (numa_on)
 				socketid =
@@ -1037,10 +1052,13 @@ main(int argc, char **argv)
 			printf("rxq=%d,%d,%d ", portid, queueid, socketid);
 			fflush(stdout);
 
+			rte_eth_dev_info_get(portid, &dev_info);
+			rxq_conf = dev_info.default_rxconf;
+			rxq_conf.offloads = conf->rxmode.offloads;
 			ret = rte_eth_rx_queue_setup(portid, queueid,
 					nb_rxd + 2*burst_size,
 					socketid,
-					NULL,
+					&rxq_conf,
 					pktmbuf_pool[socketid]);
 			if (ret < 0)
 				rte_exit(EXIT_FAILURE,
