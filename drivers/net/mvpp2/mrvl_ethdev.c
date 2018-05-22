@@ -1762,12 +1762,15 @@ mrvl_rx_queue_release(void *rxq)
 	struct pp2_hif *hif;
 	unsigned int core_id = rte_lcore_id();
 
+	if (!q)
+		return;
+
 	if (core_id == LCORE_ID_ANY)
 		core_id = 0;
 
 	hif = mrvl_get_hif(q->priv, core_id);
 
-	if (!q || !hif)
+	if (!hif)
 		return;
 
 	tc = q->priv->rxq_map[q->queue_id].tc;
