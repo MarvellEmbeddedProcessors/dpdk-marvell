@@ -108,8 +108,7 @@ int rte_mvep_init(enum mvep_module_type module,
 	}
 #endif /* MVCONF_NMP_BUILT */
 	default:
-		MVEP_COMMON_LOG(ERR, "wrong module %d.\n", module);
-		return -EINVAL;
+		break;
 	}
 
 	return 0;
