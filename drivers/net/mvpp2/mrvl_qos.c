@@ -352,6 +352,7 @@ parse_tc_cfg(struct rte_cfgfile *file, int port, int tc,
 	if (rte_cfgfile_num_sections(file, sec_name, strlen(sec_name)) <= 0)
 		return 0;
 
+	cfg->port[port].use_global_defaults = 0;
 	entry = rte_cfgfile_get_entry(file, sec_name, MRVL_TOK_RXQ);
 	if (entry) {
 		n = get_entry_values(entry,
@@ -546,26 +547,13 @@ mrvl_get_qoscfg(const char *key __rte_unused, const char *path,
 		snprintf(sec_name, sizeof(sec_name), "%s %d %s",
 			MRVL_TOK_PORT, n, MRVL_TOK_DEFAULT);
 
+		/* Use global defaults, unless an override occurs */
+		(*cfg)->port[n].use_global_defaults = 1;
+
 		/* Skip ports non-existing in configuration. */
 		if (rte_cfgfile_num_sections(file, sec_name,
 				strlen(sec_name)) <= 0) {
-			(*cfg)->port[n].use_global_defaults = 1;
-			(*cfg)->port[n].mapping_priority =
-				PP2_CLS_QOS_TBL_VLAN_IP_PRI;
 			continue;
-		}
-
-		entry = rte_cfgfile_get_entry(file, sec_name,
-				MRVL_TOK_DEFAULT_TC);
-		if (entry) {
-			if (get_val_securely(entry, &val) < 0 ||
-				val > USHRT_MAX)
-				return -1;
-			(*cfg)->port[n].default_tc = (uint8_t)val;
-		} else {
-			RTE_LOG(ERR, PMD,
-				"Default Traffic Class required in custom configuration!\n");
-			return -1;
 		}
 
 		/*
@@ -601,6 +589,7 @@ mrvl_get_qoscfg(const char *key __rte_unused, const char *path,
 		entry = rte_cfgfile_get_entry(file, sec_name,
 				MRVL_TOK_MAPPING_PRIORITY);
 		if (entry) {
+			(*cfg)->port[n].use_global_defaults = 0;
 			if (!strncmp(entry, MRVL_TOK_VLAN_IP,
 				sizeof(MRVL_TOK_VLAN_IP)))
 				(*cfg)->port[n].mapping_priority =
@@ -630,6 +619,7 @@ mrvl_get_qoscfg(const char *key __rte_unused, const char *path,
 		entry = rte_cfgfile_get_entry(file, sec_name,
 				MRVL_TOK_PLCR_DEFAULT);
 		if (entry) {
+			(*cfg)->port[n].use_global_defaults = 0;
 			if (get_val_securely(entry, &val) < 0)
 				return -1;
 
@@ -654,6 +644,21 @@ mrvl_get_qoscfg(const char *key __rte_unused, const char *path,
 				rte_exit(EXIT_FAILURE,
 					"Error %d parsing port %d tc %d!\n",
 					ret, n, i);
+		}
+
+		entry = rte_cfgfile_get_entry(file, sec_name,
+					      MRVL_TOK_DEFAULT_TC);
+		if (entry) {
+			if (get_val_securely(entry, &val) < 0 ||
+			    val > USHRT_MAX)
+				return -1;
+			(*cfg)->port[n].default_tc = (uint8_t)val;
+		} else {
+			if ((*cfg)->port[n].use_global_defaults == 0) {
+				RTE_LOG(ERR, PMD,
+					"Default Traffic Class required in custom configuration!\n");
+				return -1;
+			}
 		}
 	}
 
