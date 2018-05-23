@@ -71,6 +71,7 @@ struct mvneta_priv {
 	uint8_t pp_id;
 	uint8_t ppio_id;	/* ppio port id */
 	uint8_t uc_mc_flushed;
+	uint8_t multiseg;
 
 	struct neta_ppio_params ppio_params;
 	uint16_t nb_rx_queues;

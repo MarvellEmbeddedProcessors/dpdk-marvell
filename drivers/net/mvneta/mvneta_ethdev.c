@@ -40,7 +40,8 @@
 /** Port Tx offloads capabilities */
 #define MVNETA_TX_OFFLOADS (DEV_TX_OFFLOAD_IPV4_CKSUM | \
 			  DEV_TX_OFFLOAD_UDP_CKSUM | \
-			  DEV_TX_OFFLOAD_TCP_CKSUM)
+			  DEV_TX_OFFLOAD_TCP_CKSUM | \
+			  DEV_TX_OFFLOAD_MULTI_SEGS)
 
 #define MVNETA_PKT_SIZE_MAX (16382 - MV_MH_SIZE) /* 9700B */
 #define MVNETA_DEFAULT_MTU	1500
@@ -118,6 +119,26 @@ struct mvneta_txq {
 static int mvneta_dev_num;
 static int mvneta_lcore_first;
 static int mvneta_lcore_last;
+
+static inline void
+mvneta_fill_shadowq(struct mvneta_shadow_txq *sq, struct rte_mbuf *buf)
+{
+	sq->ent[sq->head].cookie = (uint64_t)buf;
+	sq->ent[sq->head].addr = buf ?
+		rte_mbuf_data_iova_default(buf) : 0;
+
+	sq->head = (sq->head + 1) & MRVL_NETA_TX_SHADOWQ_MASK;
+	sq->size++;
+}
+
+static inline void
+mvneta_fill_desc(struct neta_ppio_desc *desc, struct rte_mbuf *buf)
+{
+	neta_ppio_outq_desc_reset(desc);
+	neta_ppio_outq_desc_set_phys_addr(desc, rte_pktmbuf_iova(buf));
+	neta_ppio_outq_desc_set_pkt_offset(desc, 0);
+	neta_ppio_outq_desc_set_pkt_len(desc, rte_pktmbuf_data_len(buf));
+}
 
 static inline int
 mvneta_buffs_refill(struct mvneta_priv *priv, struct mvneta_rxq *rxq, u16 *num)
@@ -251,7 +272,7 @@ mvneta_sent_buffers_free(struct neta_ppio *ppio,
 		entry = &sq->ent[tail];
 
 		if (unlikely(!entry->addr)) {
-			RTE_LOG(ERR, PMD,
+			RTE_LOG(DEBUG, PMD,
 				"Shadow memory @%d: cookie(%lx), pa(%lx)!\n",
 				sq->tail, (u64)entry->cookie,
 				(u64)entry->addr);
@@ -608,7 +629,7 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 
 	if (sq->size)
 		mvneta_sent_buffers_free(q->priv->ppio,
-				sq, q->queue_id);
+					 sq, q->queue_id);
 
 	sq_free_size = MRVL_NETA_TX_SHADOWQ_SIZE - sq->size - 1;
 	if (unlikely(nb_pkts > sq_free_size)) {
@@ -625,17 +646,9 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 		enum neta_outq_l3_type l3_type;
 		enum neta_outq_l4_type l4_type;
 
-		sq->ent[sq->head].cookie = (neta_cookie_t)(uint64_t)mbuf;
-		sq->ent[sq->head].addr = rte_mbuf_data_iova_default(mbuf);
-		sq->head = (sq->head + 1) & MRVL_NETA_TX_SHADOWQ_MASK;
-		sq->size++;
-
-		neta_ppio_outq_desc_reset(&descs[i]);
-		neta_ppio_outq_desc_set_phys_addr(&descs[i],
-						 rte_pktmbuf_iova(mbuf));
-		neta_ppio_outq_desc_set_pkt_offset(&descs[i], 0);
-		neta_ppio_outq_desc_set_pkt_len(&descs[i],
-						rte_pktmbuf_pkt_len(mbuf));
+		/* Fill first mbuf info in shadow queue */
+		mvneta_fill_shadowq(sq, mbuf);
+		mvneta_fill_desc(&descs[i], mbuf);
 
 		bytes_sent += rte_pktmbuf_pkt_len(mbuf);
 
@@ -666,6 +679,142 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 				rte_pktmbuf_pkt_len((struct rte_mbuf *)addr);
 		}
 		sq->size -= num - nb_pkts;
+	}
+
+	q->bytes_sent += bytes_sent;
+
+	return nb_pkts;
+}
+
+/** DPDK callback for S/G transmit.
+ *
+ * @param txq
+ *   Generic pointer transmit queue.
+ * @param tx_pkts
+ *   Packets to transmit.
+ * @param nb_pkts
+ *   Number of packets in array.
+ *
+ * @return
+ *   Number of packets successfully transmitted.
+ */
+static uint16_t
+mvneta_tx_sg_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
+{
+	struct mvneta_txq *q = txq;
+	struct mvneta_shadow_txq *sq;
+	struct neta_ppio_desc descs[nb_pkts * NETA_PPIO_DESC_NUM_FRAGS];
+	struct neta_ppio_sg_pkts pkts;
+	uint8_t frags[nb_pkts];
+	unsigned int core_id = rte_lcore_id();
+	int i, j, ret, bytes_sent = 0;
+	int tail, tail_first;
+	uint16_t num, sq_free_size;
+	uint16_t nb_segs, total_descs = 0;
+	uint64_t addr;
+
+	sq = &q->shadow_txqs[core_id];
+	pkts.frags = frags;
+	pkts.num = 0;
+
+	if (unlikely(!q->priv->ppio))
+		return 0;
+
+	if (sq->size)
+		mvneta_sent_buffers_free(q->priv->ppio,
+					 sq, q->queue_id);
+	/* Save shadow queue free size */
+	sq_free_size = MRVL_NETA_TX_SHADOWQ_SIZE - sq->size - 1;
+
+	tail = 0;
+	for (i = 0; i < nb_pkts; i++) {
+		struct rte_mbuf *mbuf = tx_pkts[i];
+		struct rte_mbuf *seg = NULL;
+		int gen_l3_cksum, gen_l4_cksum;
+		enum neta_outq_l3_type l3_type;
+		enum neta_outq_l4_type l4_type;
+
+		nb_segs = mbuf->nb_segs;
+		total_descs += nb_segs;
+
+		/*
+		 * Check if total_descs does not exceed
+		 * shadow queue free size
+		 */
+		if (unlikely(total_descs > sq_free_size)) {
+			total_descs -= nb_segs;
+			RTE_LOG(DEBUG, PMD,
+				"No room in shadow queue for %d packets! "
+				"%d packets will be sent.\n",
+				nb_pkts, i);
+			break;
+		}
+
+
+		/* Check if nb_segs does not exceed the max nb of desc per
+		 * fragmented packet
+		 */
+		if (unlikely(nb_segs > NETA_PPIO_DESC_NUM_FRAGS)) {
+			total_descs -= nb_segs;
+			RTE_LOG(ERR, PMD,
+				"Too many segments. Packet won't be sent.\n");
+			break;
+		}
+
+		pkts.frags[pkts.num] = nb_segs;
+		pkts.num++;
+		tail_first = tail;
+
+		seg = mbuf;
+		for (j = 0; j < nb_segs - 1; j++) {
+			/* For the subsequent segments, set shadow queue
+			 * buffer to NULL
+			 */
+			mvneta_fill_shadowq(sq, NULL);
+			mvneta_fill_desc(&descs[tail], seg);
+
+			tail++;
+			seg = seg->next;
+		}
+		/* Put first mbuf info in last shadow queue entry */
+		mvneta_fill_shadowq(sq, mbuf);
+		/* Update descriptor with last segment */
+		mvneta_fill_desc(&descs[tail++], seg);
+
+		bytes_sent += rte_pktmbuf_pkt_len(mbuf);
+
+		ret = mvneta_prepare_proto_info(mbuf->ol_flags,
+						mbuf->packet_type,
+						&l3_type, &l4_type,
+						&gen_l3_cksum,
+						&gen_l4_cksum);
+		if (unlikely(ret))
+			continue;
+
+		neta_ppio_outq_desc_set_proto_info(&descs[tail_first],
+						   l3_type, l4_type,
+						   mbuf->l2_len,
+						   mbuf->l2_len + mbuf->l3_len,
+						   gen_l3_cksum, gen_l4_cksum);
+	}
+	num = total_descs;
+	neta_ppio_send_sg(q->priv->ppio, q->queue_id, descs, &total_descs,
+			  &pkts);
+
+	/* number of packets that were not sent */
+	if (unlikely(num > total_descs)) {
+		for (i = total_descs; i < num; i++) {
+			sq->head = (MRVL_NETA_TX_SHADOWQ_SIZE +
+					sq->head - 1) &
+					MRVL_NETA_TX_SHADOWQ_MASK;
+			addr = sq->ent[sq->head].cookie;
+			if (addr)
+				bytes_sent -= rte_pktmbuf_pkt_len(
+					(struct rte_mbuf *)
+					(cookie_addr_high | addr));
+		}
+		sq->size -= num - total_descs;
+		nb_pkts = pkts.num;
 	}
 
 	q->bytes_sent += bytes_sent;
@@ -813,6 +962,9 @@ mvneta_dev_configure(struct rte_eth_dev *dev)
 	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_JUMBO_FRAME)
 		dev->data->mtu = dev->data->dev_conf.rxmode.max_rx_pkt_len -
 				 MRVL_NETA_ETH_HDRS_LEN;
+
+	if (dev->data->dev_conf.txmode.offloads & DEV_TX_OFFLOAD_MULTI_SEGS)
+		priv->multiseg = 1;
 
 	ppio_params = &priv->ppio_params;
 	ppio_params->outqs_params.num_outqs = dev->data->nb_tx_queues;
@@ -1178,6 +1330,27 @@ mvneta_tx_queue_release(void *txq)
 }
 
 /**
+ * Set tx burst function according to offload flag
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ */
+static void
+mvneta_set_tx_function(struct rte_eth_dev *dev)
+{
+	struct mvneta_priv *priv = dev->data->dev_private;
+
+	/* Use a simple Tx queue (no offloads, no multi segs) if possible */
+	if (priv->multiseg) {
+		RTE_LOG(INFO, PMD, "Using multi-segment tx callback\n");
+		dev->tx_pkt_burst = mvneta_tx_sg_pkt_burst;
+	} else {
+		RTE_LOG(INFO, PMD, "Using single-segment tx callback\n");
+		dev->tx_pkt_burst = mvneta_tx_pkt_burst;
+	}
+}
+
+/**
  * DPDK callback to start the device.
  *
  * @param dev
@@ -1250,6 +1423,8 @@ mvneta_dev_start(struct rte_eth_dev *dev)
 	/* start tx queues */
 	for (i = 0; i < dev->data->nb_tx_queues; i++)
 		dev->data->tx_queue_state[i] = RTE_ETH_QUEUE_STATE_STARTED;
+
+	mvneta_set_tx_function(dev);
 
 	return 0;
 
@@ -1671,12 +1846,12 @@ mvneta_eth_dev_create(struct rte_vdev_device *vdev, const char *name)
 	memcpy(eth_dev->data->mac_addrs[0].addr_bytes,
 	       req.ifr_addr.sa_data, ETHER_ADDR_LEN);
 
-	eth_dev->rx_pkt_burst = mvneta_rx_pkt_burst;
-	eth_dev->tx_pkt_burst = mvneta_tx_pkt_burst;
 	eth_dev->data->kdrv = RTE_KDRV_NONE;
 	eth_dev->data->dev_private = priv;
 	eth_dev->device = &vdev->device;
-	eth_dev->dev_ops = &mvneta_ops;
+	eth_dev->rx_pkt_burst = mvneta_rx_pkt_burst;
+	mvneta_set_tx_function(eth_dev);
+;	eth_dev->dev_ops = &mvneta_ops;
 
 	return 0;
 out_free_mac:
