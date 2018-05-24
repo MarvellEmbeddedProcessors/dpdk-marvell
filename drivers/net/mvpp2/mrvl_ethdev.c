@@ -372,7 +372,7 @@ mrvl_dev_configure(struct rte_eth_dev *dev)
 
 	ret = mrvl_tm_init(dev);
 	if (ret < 0)
-		return ret;
+		RTE_LOG(WARNING, PMD, "Traffic Management Init has failed.\n");
 
 	if (dev->data->nb_rx_queues == 1 &&
 	    dev->data->dev_conf.rxmode.mq_mode == ETH_MQ_RX_RSS) {
