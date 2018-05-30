@@ -70,6 +70,7 @@
 #define MRVL_PKT_EFFEC_OFFS (MRVL_PKT_OFFS + MV_MH_SIZE)
 /* Maximum allowable packet size */
 #define MRVL_PKT_SIZE_MAX (10240 - MV_MH_SIZE)
+#define MRVL_DEFAULT_MTU	1500
 
 #define MRVL_IFACE_NAME_ARG "iface"
 #define MRVL_CFG_ARG "cfg"
@@ -354,7 +355,7 @@ mrvl_dev_configure(struct rte_eth_dev *dev)
 
 	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_JUMBO_FRAME)
 		dev->data->mtu = dev->data->dev_conf.rxmode.max_rx_pkt_len -
-				 ETHER_HDR_LEN - ETHER_CRC_LEN;
+				 MRVL_PP2_ETH_HDRS_LEN;
 
 	ret = mrvl_configure_rxqs(priv, dev->data->port_id,
 				  dev->data->nb_rx_queues);
@@ -404,24 +405,55 @@ static int
 mrvl_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 {
 	struct mrvl_priv *priv = dev->data->dev_private;
-	/* extra MV_MH_SIZE bytes are required for Marvell tag */
-	uint16_t mru = mtu + MV_MH_SIZE + ETHER_HDR_LEN + ETHER_CRC_LEN;
+	uint16_t mru;
+	uint16_t mbuf_data_size = 0; /* SW buffer size */
 	int ret;
 
-	if (mtu < ETHER_MIN_MTU || mru > MRVL_PKT_SIZE_MAX)
-		return -EINVAL;
-
-	if (!priv->ppio) {
-		priv->init_cfg.is_set_mtu = 1;
-		priv->init_cfg.mtu = mtu;
-		return 0;
+	mru = MRVL_PP2_MTU_TO_MRU(mtu);
+	/*
+	 * min_rx_buf_size is equal to mbuf data size
+	 * if pmd didn't set it differently
+	 */
+	mbuf_data_size = dev->data->min_rx_buf_size - RTE_PKTMBUF_HEADROOM;
+	/* Prevent PMD from:
+	 * - setting mru greater than the mbuf size resulting in
+	 * hw and sw buffer size mismatch
+	 * - setting mtu that requires the support of scattered packets
+	 * when this feature has not been enabled/supported so far.
+	 */
+	if (!dev->data->scattered_rx &&
+	    (mru + MRVL_PKT_OFFS > mbuf_data_size)) {
+		mru = mbuf_data_size - MRVL_PKT_OFFS;
+		mtu = MRVL_PP2_MRU_TO_MTU(mru);
+		RTE_LOG(WARNING, PMD, "MTU too big, max MTU possible limitted "
+			"by current mbuf size: %u. Set MTU to %u, MRU to %u\n",
+			mbuf_data_size, mtu, mru);
 	}
 
-	ret = pp2_ppio_set_mru(priv->ppio, mru);
-	if (ret)
-		return ret;
+	if (mtu < ETHER_MIN_MTU || mru > MRVL_PKT_SIZE_MAX) {
+		RTE_LOG(ERR, PMD, "Invalid MTU [%u] or MRU [%u]\n", mtu, mru);
+		return -EINVAL;
+	}
 
-	return pp2_ppio_set_mtu(priv->ppio, mtu);
+	dev->data->mtu = mtu;
+	dev->data->dev_conf.rxmode.max_rx_pkt_len = mru - MV_MH_SIZE;
+
+	if (!priv->ppio)
+		return 0;
+
+	ret = pp2_ppio_set_mru(priv->ppio, mru);
+	if (ret) {
+		RTE_LOG(ERR, PMD, "Failed to change MRU\n");
+		return ret;
+	}
+
+	ret = pp2_ppio_set_mtu(priv->ppio, mtu);
+	if (ret) {
+		RTE_LOG(ERR, PMD, "Failed to change MTU\n");
+		return ret;
+	}
+
+	return 0;
 }
 
 /**
@@ -899,18 +931,14 @@ mrvl_dev_start(struct rte_eth_dev *dev)
 		}
 		priv->vlan_flushed = 1;
 	}
+	ret = mrvl_mtu_set(dev, dev->data->mtu);
+	if (ret)
+		RTE_LOG(ERR, PMD, "Failed to set MTU to %d\n",
+			dev->data->mtu);
 	/*
 	 * In case that some initial configurations were done before ppio
 	 * object was initialized perform them here.
 	 */
-
-	if (priv->init_cfg.is_set_mtu) {
-		ret = mrvl_mtu_set(dev, priv->init_cfg.mtu);
-		if (ret)
-			RTE_LOG(ERR, PMD, "Failed to set MTU to %d\n",
-				priv->init_cfg.mtu);
-	}
-
 	if (priv->init_cfg.is_promisc)
 		mrvl_promiscuous_enable(dev);
 	else
@@ -1686,8 +1714,8 @@ mrvl_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 {
 	struct mrvl_priv *priv = dev->data->dev_private;
 	struct mrvl_rxq *rxq;
-	uint32_t min_size,
-		 max_rx_pkt_len = dev->data->dev_conf.rxmode.max_rx_pkt_len;
+	uint32_t frame_size, buf_size = rte_pktmbuf_data_room_size(mp);
+	uint32_t max_rx_pkt_len = dev->data->dev_conf.rxmode.max_rx_pkt_len;
 	int ret, tc, inq;
 
 	if (!mrvl_rx_queue_offloads_okay(dev, conf->offloads))
@@ -1702,15 +1730,16 @@ mrvl_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 		return -EFAULT;
 	}
 
-	min_size = rte_pktmbuf_data_room_size(mp) - RTE_PKTMBUF_HEADROOM -
-		   MRVL_PKT_EFFEC_OFFS;
-	if (min_size < max_rx_pkt_len) {
-		RTE_LOG(ERR, PMD,
-			"Mbuf size must be increased to %u bytes to hold up to %u bytes of data.\n",
-			max_rx_pkt_len + RTE_PKTMBUF_HEADROOM +
-			MRVL_PKT_EFFEC_OFFS,
+	frame_size = buf_size - RTE_PKTMBUF_HEADROOM - MRVL_PKT_EFFEC_OFFS;
+	if (frame_size < max_rx_pkt_len) {
+		RTE_LOG(WARNING, PMD,
+			"Mbuf size must be increased to %u bytes to hold up "
+			"to %u bytes of data.\n",
+			buf_size + max_rx_pkt_len - frame_size,
 			max_rx_pkt_len);
-		return -EINVAL;
+		dev->data->dev_conf.rxmode.max_rx_pkt_len = frame_size;
+		RTE_LOG(INFO, PMD, "Setting max rx pkt len to %u\n",
+			dev->data->dev_conf.rxmode.max_rx_pkt_len);
 	}
 
 	if (dev->data->rx_queues[idx]) {

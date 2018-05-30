@@ -111,11 +111,15 @@
  */
 #define MRVL_PRS_VLAN_FILT_MAX 10
 
+#define MRVL_PP2_VLAN_TAG_LEN		4
+#define MRVL_PP2_ETH_HDRS_LEN		(ETHER_HDR_LEN + ETHER_CRC_LEN + \
+					(2 * MRVL_PP2_VLAN_TAG_LEN))
+#define MRVL_PP2_HDRS_LEN		(MV_MH_SIZE + MRVL_PP2_ETH_HDRS_LEN)
+#define MRVL_PP2_MTU_TO_MRU(mtu)	((mtu) + MRVL_PP2_HDRS_LEN)
+#define MRVL_PP2_MRU_TO_MTU(mru)	((mru) - MRVL_PP2_HDRS_LEN)
 
 
 struct mrvl_config {
-	int is_set_mtu;
-	uint16_t mtu;
 	int is_link_down;
 	int is_promisc;
 	int is_mc_promisc;
