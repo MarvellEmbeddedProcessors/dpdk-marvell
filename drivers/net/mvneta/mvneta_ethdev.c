@@ -879,7 +879,6 @@ mvneta_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 
 		mbuf->data_off += MVNETA_PKT_EFFEC_OFFS;
 		mbuf->pkt_len = neta_ppio_inq_desc_get_pkt_len(&descs[i]);
-		mbuf->pkt_len -= (MV_MH_SIZE + ETH_FCS_LEN);
 		mbuf->data_len = mbuf->pkt_len;
 		mbuf->port = q->port_id;
 		mbuf->packet_type =
