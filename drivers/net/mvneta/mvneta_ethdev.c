@@ -51,8 +51,8 @@
 
 #define MVNETA_PKT_EFFEC_OFFS (MRVL_NETA_PKT_OFFS + MV_MH_SIZE)
 
-uint64_t cookie_addr_high = MVNETA_COOKIE_ADDR_INVALID;
-uint16_t rx_desc_free_thresh = MRVL_NETA_BUF_RELEASE_BURST_SIZE_MIN;
+static uint64_t cookie_addr_high = MVNETA_COOKIE_ADDR_INVALID;
+static uint16_t rx_desc_free_thresh = MRVL_NETA_BUF_RELEASE_BURST_SIZE_MIN;
 
 #define MVNETA_SET_COOKIE_HIGH_ADDR(addr) {				\
 	if (unlikely(cookie_addr_high == MVNETA_COOKIE_ADDR_INVALID))	\
