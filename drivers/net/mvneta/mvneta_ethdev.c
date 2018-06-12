@@ -112,7 +112,7 @@ struct mvneta_txq {
 	int queue_id;
 	int port_id;
 	uint64_t bytes_sent;
-	struct mvneta_shadow_txq shadow_txqs[RTE_MAX_LCORE];
+	struct mvneta_shadow_txq shadow_txq;
 	int tx_deferred_start;
 };
 
@@ -347,26 +347,21 @@ mvneta_rx_queue_flush(struct mvneta_rxq *rxq)
 static void
 mvneta_tx_queue_flush(struct mvneta_txq *txq)
 {
-	int i;
+	struct mvneta_shadow_txq *sq = &txq->shadow_txq;
 
-	for (i = 0; i < RTE_MAX_LCORE; i++) {
-		struct mvneta_shadow_txq *sq;
+	if (sq->size)
+		mvneta_sent_buffers_free(txq->priv->ppio, sq,
+					 txq->queue_id);
 
-		sq = &txq->shadow_txqs[i];
-		if (sq->size)
-			mvneta_sent_buffers_free(txq->priv->ppio, sq,
-						 txq->queue_id);
-
-		/* free the rest of them */
-		while (sq->tail != sq->head) {
-			uint64_t addr = cookie_addr_high |
-				sq->ent[sq->tail].cookie;
-			rte_pktmbuf_free(
-				(struct rte_mbuf *)addr);
-			sq->tail = (sq->tail + 1) & MRVL_NETA_TX_SHADOWQ_MASK;
-		}
-		memset(sq, 0, sizeof(*sq));
+	/* free the rest of them */
+	while (sq->tail != sq->head) {
+		uint64_t addr = cookie_addr_high |
+			sq->ent[sq->tail].cookie;
+		rte_pktmbuf_free(
+			(struct rte_mbuf *)addr);
+		sq->tail = (sq->tail + 1) & MRVL_NETA_TX_SHADOWQ_MASK;
 	}
+	memset(sq, 0, sizeof(*sq));
 }
 
 /**
@@ -617,13 +612,12 @@ mvneta_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 	struct mvneta_txq *q = txq;
 	struct mvneta_shadow_txq *sq;
 	struct neta_ppio_desc descs[nb_pkts];
-	unsigned int core_id = rte_lcore_id();
 
 	int i, ret, bytes_sent = 0;
 	uint16_t num, sq_free_size;
 	uint64_t addr;
 
-	sq = &q->shadow_txqs[core_id];
+	sq = &q->shadow_txq;
 	if (unlikely(!q->priv->ppio))
 		return 0;
 
@@ -706,14 +700,13 @@ mvneta_tx_sg_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 	struct neta_ppio_desc descs[nb_pkts * NETA_PPIO_DESC_NUM_FRAGS];
 	struct neta_ppio_sg_pkts pkts;
 	uint8_t frags[nb_pkts];
-	unsigned int core_id = rte_lcore_id();
 	int i, j, ret, bytes_sent = 0;
 	int tail, tail_first;
 	uint16_t num, sq_free_size;
 	uint16_t nb_segs, total_descs = 0;
 	uint64_t addr;
 
-	sq = &q->shadow_txqs[core_id];
+	sq = &q->shadow_txq;
 	pkts.frags = frags;
 	pkts.num = 0;
 
