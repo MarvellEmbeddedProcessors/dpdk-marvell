@@ -1261,8 +1261,14 @@ mvgiu_tx_pkt_burst(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 		if (unlikely(ret))
 			continue;
 
-		giu_gpio_outq_desc_set_proto_info(&descs[i], l3_type, l4_type,
+		giu_gpio_outq_desc_set_proto_info(&descs[i],
+						  GIU_DESC_ERR_OK,
+						  GIU_OUTQ_L2_UNICAST,
+						  GIU_VLAN_TAG_NONE,
+						  GIU_OUTQ_L3_UNICAST,
+						  l3_type,
 						  mbuf->l2_len,
+						  l4_type,
 						  mbuf->l2_len + mbuf->l3_len);
 	}
 
