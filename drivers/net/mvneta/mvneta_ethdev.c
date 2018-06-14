@@ -274,7 +274,7 @@ mvneta_sent_buffers_free(struct neta_ppio *ppio,
 		if (unlikely(!entry->addr)) {
 			RTE_LOG(DEBUG, PMD,
 				"Shadow memory @%d: cookie(%lx), pa(%lx)!\n",
-				sq->tail, (u64)entry->cookie,
+				tail, (u64)entry->cookie,
 				(u64)entry->addr);
 			tail = (tail + 1) & MRVL_NETA_TX_SHADOWQ_MASK;
 			continue;
