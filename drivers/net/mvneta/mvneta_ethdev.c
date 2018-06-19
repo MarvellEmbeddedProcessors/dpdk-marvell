@@ -1361,7 +1361,7 @@ mvneta_dev_start(struct rte_eth_dev *dev)
 	if (priv->ppio)
 		return mvneta_dev_set_link_up(dev);
 
-	snprintf(match, sizeof(match), "eth%d", priv->ppio_id);
+	snprintf(match, sizeof(match), "%s", dev->data->name);
 	priv->ppio_params.match = match;
 	priv->ppio_params.inqs_params.mtu = dev->data->mtu;
 
