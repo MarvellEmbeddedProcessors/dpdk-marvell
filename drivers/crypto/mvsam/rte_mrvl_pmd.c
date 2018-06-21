@@ -524,9 +524,20 @@ mrvl_request_prepare(struct sam_cio_op_params *request,
 	}
 	request->src = src_bd;
 
+	/* Empty destination. */
+	if (rte_pktmbuf_data_len(dst_mbuf) == 0) {
+		/* Make dst buffer fit at least source data. */
+		if (rte_pktmbuf_append(dst_mbuf,
+			rte_pktmbuf_data_len(op->sym->m_src)) == NULL) {
+			MRVL_CRYPTO_LOG_ERR("Unable to set big enough dst buffer!");
+			return -1;
+		}
+	}
+
 	request->dst = dst_bd;
 	dst_bd->vaddr = rte_pktmbuf_mtod(dst_mbuf, void *);
 	dst_bd->paddr = rte_pktmbuf_iova(dst_mbuf);
+
 	/*
 	 * We can use all available space in dst_mbuf,
 	 * not only what's used currently.
@@ -730,12 +741,7 @@ mrvl_crypto_pmd_dequeue_burst(void *queue_pair,
 
 	/* Unpack and check results. */
 	for (i = 0; i < nb_ops; ++i) {
-		struct rte_mbuf *mbuf;
-
 		ops[i] = results[i].cookie;
-		/* Set proper result length in dst_mbuf */
-		mbuf = ops[i]->sym->m_dst;
-		mbuf->pkt_len = mbuf->data_len = results[i].out_len;
 
 		switch (results[i].status) {
 		case SAM_CIO_OK:
