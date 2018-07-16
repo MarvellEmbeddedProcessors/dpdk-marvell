@@ -922,7 +922,8 @@ mvneta_dev_configure(struct rte_eth_dev *dev)
 	if (dev->data->dev_conf.rxmode.mq_mode != ETH_MQ_RX_NONE) {
 		RTE_LOG(INFO, PMD, "Unsupported RSS and rx multi queue mode %d\n",
 			dev->data->dev_conf.rxmode.mq_mode);
-		return -EINVAL;
+		if (dev->data->nb_rx_queues > 1)
+			return -EINVAL;
 	}
 
 	if (!(dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_CRC_STRIP)) {
