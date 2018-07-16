@@ -17,6 +17,7 @@ enum mvep_module_type {
 	MVEP_MOD_T_PP2,
 	MVEP_MOD_T_SAM,
 	MVEP_MOD_T_GIU,
+	MVEP_MOD_T_NETA,
 
 	MVEP_MOD_T_LAST
 };

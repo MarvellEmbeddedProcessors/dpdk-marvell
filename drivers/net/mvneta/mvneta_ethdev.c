@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <rte_mvep_common.h>
 #include "mvneta_ethdev.h"
 
 
@@ -1921,23 +1922,16 @@ rte_pmd_mvneta_probe(struct rte_vdev_device *vdev)
 		goto init_devices;
 
 	RTE_LOG(INFO, PMD, "Perform MUSDK initializations\n");
-	/*
-	 * ret == -EEXIST is correct, it means DMA
-	 * has been already initialized (by another PMD).
-	 */
-	ret = mv_sys_dma_mem_init(MVNETA_MUSDK_DMA_MEMSIZE);
-	if (ret < 0) {
-		if (ret != -EEXIST)
-			goto out_free_kvlist;
-		else
-			RTE_LOG(INFO, PMD,
-					"DMA memory has been already initialized by a different driver.\n");
-	}
+
+	ret = rte_mvep_init(MVEP_MOD_T_NETA, kvlist);
+	if (ret)
+		goto out_free_kvlist;
 
 	ret = mvneta_neta_init();
 	if (ret) {
 		RTE_LOG(ERR, PMD, "Failed to init NETA!\n");
-		goto out_deinit_dma;
+		rte_mvep_deinit(MVEP_MOD_T_NETA);
+		goto out_free_kvlist;
 	}
 
 	mvneta_lcore_first = RTE_MAX_LCORE;
@@ -1959,11 +1953,10 @@ out_cleanup:
 	for (; i > 0; i--)
 		mvneta_eth_dev_destroy(ifnames.names[i]);
 
-	if (mvneta_dev_num == 0)
+	if (mvneta_dev_num == 0) {
 		mvneta_neta_deinit();
-out_deinit_dma:
-	if (mvneta_dev_num == 0)
-		mv_sys_dma_mem_destroy();
+		rte_mvep_deinit(MVEP_MOD_T_NETA);
+	}
 out_free_kvlist:
 	rte_kvargs_free(kvlist);
 
@@ -2002,7 +1995,7 @@ rte_pmd_mvneta_remove(struct rte_vdev_device *vdev)
 	if (mvneta_dev_num == 0) {
 		RTE_LOG(INFO, PMD, "Perform MUSDK deinit\n");
 		mvneta_neta_deinit();
-		mv_sys_dma_mem_destroy();
+		rte_mvep_deinit(MVEP_MOD_T_NETA);
 	}
 
 	return 0;

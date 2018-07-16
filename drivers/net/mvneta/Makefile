@@ -23,6 +23,7 @@ LIBABIVER := 1
 EXPORT_MAP := rte_pmd_mvneta_version.map
 
 # external library dependencies
+CFLAGS += -I$(RTE_SDK)/drivers/common/mvep
 CFLAGS += -I$(LIBMUSDK_PATH)/include
 CFLAGS += -DMVCONF_TYPES_PUBLIC
 CFLAGS += -DMVCONF_DMA_PHYS_ADDR_T_PUBLIC
