@@ -46,6 +46,7 @@ LIB = librte_pmd_mvsam_crypto.a
 # build flags
 CFLAGS += -O3
 CFLAGS += $(WERROR_FLAGS)
+CFLAGS += -I$(RTE_SDK)/drivers/common/mvep
 CFLAGS += -I$(LIBMUSDK_PATH)/include
 CFLAGS += -DMVCONF_TYPES_PUBLIC
 CFLAGS += -DMVCONF_DMA_PHYS_ADDR_T_PUBLIC
