@@ -1017,6 +1017,29 @@ mvneta_dev_infos_get(struct rte_eth_dev *dev __rte_unused,
 }
 
 /**
+ * Return supported packet types.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure (unused).
+ *
+ * @return
+ *   Const pointer to the table with supported packet types.
+ */
+static const uint32_t *
+mvneta_dev_supported_ptypes_get(struct rte_eth_dev *dev __rte_unused)
+{
+	static const uint32_t ptypes[] = {
+		RTE_PTYPE_L2_ETHER,
+		RTE_PTYPE_L3_IPV4,
+		RTE_PTYPE_L3_IPV6,
+		RTE_PTYPE_L4_TCP,
+		RTE_PTYPE_L4_UDP
+	};
+
+	return ptypes;
+}
+
+/**
  * DPDK callback to get information about specific receive queue.
  *
  * @param dev
@@ -1765,6 +1788,7 @@ static const struct eth_dev_ops mvneta_ops = {
 	.mtu_set = mvneta_mtu_set,
 	.stats_get = mvneta_stats_get,
 	.dev_infos_get = mvneta_dev_infos_get,
+	.dev_supported_ptypes_get = mvneta_dev_supported_ptypes_get,
 	.rxq_info_get = mvneta_rxq_info_get,
 	.txq_info_get = mvneta_txq_info_get,
 	.rx_queue_setup = mvneta_rx_queue_setup,
