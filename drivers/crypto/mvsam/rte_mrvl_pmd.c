@@ -819,7 +819,8 @@ cryptodev_mrvl_crypto_create(const char *name,
 
 	sam_params.max_num_sessions = internals->max_nb_sessions;
 
-	sam_set_debug_flags(3);
+	/*sam_set_debug_flags(3);*/
+
 	return sam_init(&sam_params);
 
 init_error:
