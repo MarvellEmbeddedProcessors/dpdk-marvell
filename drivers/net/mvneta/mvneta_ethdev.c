@@ -473,6 +473,9 @@ mvneta_desc_to_packet_type_and_offset(struct neta_ppio_desc *desc,
 
 	packet_type = RTE_PTYPE_L2_ETHER;
 
+	if (NETA_RXD_GET_VLAN_INFO(desc))
+		packet_type |= RTE_PTYPE_L2_ETHER_VLAN;
+
 	switch (l3_type) {
 	case NETA_INQ_L3_TYPE_IPV4_BAD:
 	case NETA_INQ_L3_TYPE_IPV4_OK:
@@ -1030,6 +1033,7 @@ mvneta_dev_supported_ptypes_get(struct rte_eth_dev *dev __rte_unused)
 {
 	static const uint32_t ptypes[] = {
 		RTE_PTYPE_L2_ETHER,
+		RTE_PTYPE_L2_ETHER_VLAN,
 		RTE_PTYPE_L3_IPV4,
 		RTE_PTYPE_L3_IPV6,
 		RTE_PTYPE_L4_TCP,
