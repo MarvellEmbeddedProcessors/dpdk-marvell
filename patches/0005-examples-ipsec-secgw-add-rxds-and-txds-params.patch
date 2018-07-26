@@ -1,0 +1,96 @@
+From fdf6ae22527103c7edf39cc875231277d85e5de9 Mon Sep 17 00:00:00 2001
+From: Dmitri Epshtein <dima@marvell.com>
+Date: Thu, 22 Mar 2018 16:56:07 +0200
+Subject: [PATCH 5/5] examples/ipsec-secgw: add rxds and txds params
+
+New parameters:
+"-r NUM_RXD" - Number of descripotrs in receive queue
+"-t NUM_TXD" - Number of descriptors in transmit queue
+
+Change-Id: I5b21599af2a4d72e2d173c576c2cad8039f50e63
+Signed-off-by: Dmitri Epshtein <dima@marvell.com>
+Reviewed-on: http://vgitil04.il.marvell.com:8080/52801
+Tested-by: iSoC Platform CI <ykjenk@marvell.com>
+---
+ examples/ipsec-secgw/ipsec-secgw.c | 30 +++++++++++++++++++++++++-----
+ 1 file changed, 25 insertions(+), 5 deletions(-)
+
+diff --git a/examples/ipsec-secgw/ipsec-secgw.c b/examples/ipsec-secgw/ipsec-secgw.c
+index d5a8459..bfc0a50 100644
+--- a/examples/ipsec-secgw/ipsec-secgw.c
++++ b/examples/ipsec-secgw/ipsec-secgw.c
+@@ -80,7 +80,7 @@ static int32_t	nb_mbufs;
+ /*
+  * Configurable number of RX/TX ring descriptors
+  */
+-#define IPSEC_SECGW_RX_DESC_DEFAULT 1024
++#define IPSEC_SECGW_RX_DESC_DEFAULT  512
+ #define IPSEC_SECGW_TX_DESC_DEFAULT 1024
+ static uint16_t nb_rxd = IPSEC_SECGW_RX_DESC_DEFAULT;
+ static uint16_t nb_txd = IPSEC_SECGW_TX_DESC_DEFAULT;
+@@ -948,6 +948,8 @@ print_usage(const char *prgname)
+ 		"  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
+ 		"  -P : enable promiscuous mode\n"
+ 		"  -n NUM_MBUFS: Number of mbufs\n"
++		"  -r NUM_RXD: Number of descripotrs in receive queue\n"
++		"  -t NUM_TXD: Number of descriptors in transmit queue\n"
+ 		"  -u PORTMASK: hexadecimal bitmask of unprotected ports\n"
+ 		"  -j FRAMESIZE: jumbo frame maximum size\n"
+ 		"  --"OPTION_CONFIG": (port,queue,lcore): "
+@@ -1087,7 +1089,7 @@ parse_args(int32_t argc, char **argv)
+ {
+ 	int32_t opt, ret;
+ 	char **argvopt;
+-	int32_t option_index;
++	int32_t option_index, rxds, txds;
+ 	char *prgname = argv[0];
+ 	static struct option lgopts[] = {
+ 		{OPTION_CONFIG, 1, 0, 0},
+@@ -1099,7 +1101,7 @@ parse_args(int32_t argc, char **argv)
+ 
+ 	argvopt = argv;
+ 
+-	while ((opt = getopt_long(argc, argvopt, "p:Pu:f:j:n:",
++	while ((opt = getopt_long(argc, argvopt, "p:Pu:f:j:n:r:t:",
+ 				lgopts, &option_index)) != EOF) {
+ 
+ 		switch (opt) {
+@@ -1131,6 +1133,24 @@ parse_args(int32_t argc, char **argv)
+ 				return -1;
+ 			}
+ 			break;
++		case 'r':
++			rxds = parse_decimal(optarg);
++			if (rxds == -1) {
++				printf("invalid number of rxds\n");
++				print_usage(prgname);
++				return -1;
++			}
++			nb_rxd = (uint16_t)rxds;
++			break;
++		case 't':
++			txds = parse_decimal(optarg);
++			if (txds == -1) {
++				printf("invalid number of txds\n");
++				print_usage(prgname);
++				return -1;
++			}
++			nb_txd = (uint16_t)txds;
++			break;
+ 		case 'f':
+ 			if (f_present == 1) {
+ 				printf("\"-f\" option present more than "
+@@ -1707,8 +1727,8 @@ main(int32_t argc, char **argv)
+ 	if (!nb_mbufs)
+ 		nb_mbufs = 2 * nb_rxd * nb_ports * nb_lcores;
+ 
+-	printf("nb_lcores = %d, nb_ports = %d, nb_mbufs = %d\n",
+-		nb_lcores, nb_ports, nb_mbufs);
++	printf("nb_lcores=%d, nb_ports=%d, nb_rxd=%d, nb_txd=%d, nb_mbufs=%d\n",
++		nb_lcores, nb_ports, nb_rxd, nb_txd, nb_mbufs);
+ 
+ 	/* Replicate each context per socket */
+ 	for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
+-- 
+2.7.4
+

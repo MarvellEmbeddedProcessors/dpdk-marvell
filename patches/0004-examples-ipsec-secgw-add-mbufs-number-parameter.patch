@@ -1,0 +1,100 @@
+From 525f0eb5be13b1f7bee6440213660ffef885335a Mon Sep 17 00:00:00 2001
+From: Dmitri Epshtein <dima@marvell.com>
+Date: Wed, 21 Mar 2018 13:03:39 +0200
+Subject: [PATCH 4/5] examples/ipsec-secgw: add mbufs number parameter
+
+new parameter: -n NUM_MBUFS
+default number of mbufs: 2 * nb_rxd * nb_lcores * nb_ports
+
+Change-Id: I50e701b1008fcacc02c167398fcc0e6383b799ab
+Signed-off-by: Dmitri Epshtein <dima@marvell.com>
+Reviewed-on: http://vgitil04.il.marvell.com:8080/52334
+Tested-by: iSoC Platform CI <ykjenk@marvell.com>
+Reviewed-by: Natalie Samsonov <nsamsono@marvell.com>
+Reviewed-on: http://vgitil04.il.marvell.com:8080/52423
+---
+ examples/ipsec-secgw/ipsec-secgw.c | 26 ++++++++++++++++++++++----
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/examples/ipsec-secgw/ipsec-secgw.c b/examples/ipsec-secgw/ipsec-secgw.c
+index bed784c..d5a8459 100644
+--- a/examples/ipsec-secgw/ipsec-secgw.c
++++ b/examples/ipsec-secgw/ipsec-secgw.c
+@@ -52,7 +52,7 @@
+ 
+ #define MEMPOOL_CACHE_SIZE 256
+ 
+-#define NB_MBUF	(32000)
++static int32_t	nb_mbufs;
+ 
+ #define CDEV_QUEUE_DESC 2048
+ #define CDEV_MAP_ENTRIES 1024
+@@ -947,6 +947,7 @@ print_usage(const char *prgname)
+ 		" --single-sa SAIDX -f CONFIG_FILE\n"
+ 		"  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
+ 		"  -P : enable promiscuous mode\n"
++		"  -n NUM_MBUFS: Number of mbufs\n"
+ 		"  -u PORTMASK: hexadecimal bitmask of unprotected ports\n"
+ 		"  -j FRAMESIZE: jumbo frame maximum size\n"
+ 		"  --"OPTION_CONFIG": (port,queue,lcore): "
+@@ -1098,7 +1099,7 @@ parse_args(int32_t argc, char **argv)
+ 
+ 	argvopt = argv;
+ 
+-	while ((opt = getopt_long(argc, argvopt, "p:Pu:f:j:",
++	while ((opt = getopt_long(argc, argvopt, "p:Pu:f:j:n:",
+ 				lgopts, &option_index)) != EOF) {
+ 
+ 		switch (opt) {
+@@ -1122,6 +1123,14 @@ parse_args(int32_t argc, char **argv)
+ 				return -1;
+ 			}
+ 			break;
++		case 'n':
++			nb_mbufs = parse_decimal(optarg);
++			if (nb_mbufs == -1) {
++				printf("invalid number of mbufs\n");
++				print_usage(prgname);
++				return -1;
++			}
++			break;
+ 		case 'f':
+ 			if (f_present == 1) {
+ 				printf("\"-f\" option present more than "
+@@ -1653,7 +1662,8 @@ pool_init(struct socket_ctx *ctx, int32_t socket_id, uint32_t nb_mbuf)
+ 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool on socket %d\n",
+ 				socket_id);
+ 	else
+-		printf("Allocated mbuf pool on socket %d\n", socket_id);
++		printf("Allocated %d mbufs of %d bytes for %s\n",
++			nb_mbufs, buff_size, s);
+ }
+ 
+ int32_t
+@@ -1692,6 +1702,14 @@ main(int32_t argc, char **argv)
+ 
+ 	nb_lcores = rte_lcore_count();
+ 
++
++	/* Default number of mbufs is 2 * nb_rxd * nb_ports * nb_lcores */
++	if (!nb_mbufs)
++		nb_mbufs = 2 * nb_rxd * nb_ports * nb_lcores;
++
++	printf("nb_lcores = %d, nb_ports = %d, nb_mbufs = %d\n",
++		nb_lcores, nb_ports, nb_mbufs);
++
+ 	/* Replicate each context per socket */
+ 	for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
+ 		if (rte_lcore_is_enabled(lcore_id) == 0)
+@@ -1713,7 +1731,7 @@ main(int32_t argc, char **argv)
+ 
+ 		rt_init(&socket_ctx[socket_id], socket_id);
+ 
+-		pool_init(&socket_ctx[socket_id], socket_id, NB_MBUF);
++		pool_init(&socket_ctx[socket_id], socket_id, nb_mbufs);
+ 	}
+ 
+ 	for (portid = 0; portid < nb_ports; portid++) {
+-- 
+2.7.4
+

@@ -1,0 +1,123 @@
+From 982005f50949393a93b2f9da97db99d972bd391c Mon Sep 17 00:00:00 2001
+From: Dmitri Epshtein <dima@marvell.com>
+Date: Mon, 19 Mar 2018 18:51:25 +0200
+Subject: [PATCH 2/5] examples/ipsec-secgw: add ^C support for graceful exit
+
+- stop and close all ports
+- stop and close all crypto devices
+
+Change-Id: I88bc26676f869c18e60d21dc834ba2cb9a916410
+Signed-off-by: Dmitri Epshtein <dima@marvell.com>
+Reviewed-on: http://vgitil04.il.marvell.com:8080/52189
+Reviewed-by: Natalie Samsonov <nsamsono@marvell.com>
+(cherry picked from commit c75f3109f8c607c89f368461c496597e978b6d7c)
+Reviewed-on: http://vgitil04.il.marvell.com:8080/52329
+Tested-by: iSoC Platform CI <ykjenk@marvell.com>
+Reviewed-by: Yelena Krivosheev <yelena@marvell.com>
+---
+ examples/ipsec-secgw/ipsec-secgw.c | 40 +++++++++++++++++++++++++++++++++++---
+ 1 file changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/examples/ipsec-secgw/ipsec-secgw.c b/examples/ipsec-secgw/ipsec-secgw.c
+index 3a8562e..bed784c 100644
+--- a/examples/ipsec-secgw/ipsec-secgw.c
++++ b/examples/ipsec-secgw/ipsec-secgw.c
+@@ -13,8 +13,10 @@
+ #include <string.h>
+ #include <sys/queue.h>
+ #include <stdarg.h>
++#include <stdbool.h>
+ #include <errno.h>
+ #include <getopt.h>
++#include <signal.h>
+ 
+ #include <rte_common.h>
+ #include <rte_byteorder.h>
+@@ -124,6 +126,8 @@ struct ethaddr_info ethaddr_tbl[RTE_MAX_ETHPORTS] = {
+ 	{ 0, ETHADDR(0x00, 0x16, 0x3e, 0x49, 0x9e, 0xdd) }
+ };
+ 
++static volatile bool force_quit;
++
+ /* mask of enabled ports */
+ static uint32_t enabled_port_mask;
+ static uint64_t enabled_cryptodev_mask = UINT64_MAX;
+@@ -209,6 +213,16 @@ struct ipsec_traffic {
+ 	struct traffic_type ip4;
+ 	struct traffic_type ip6;
+ };
++static void signal_handler(int signum)
++{
++	if (signum == SIGINT || signum == SIGTERM) {
++		printf("\n\nSignal %d received, preparing to exit...\n",
++				signum);
++		force_quit = true;
++		signal(SIGINT, SIG_DFL);
++		signal(SIGTERM, SIG_DFL);
++	}
++}
+ 
+ static inline void
+ prepare_one_packet(struct rte_mbuf *pkt, struct ipsec_traffic *t)
+@@ -820,7 +834,7 @@ main_loop(__attribute__((unused)) void *dummy)
+ 			lcore_id, portid, queueid);
+ 	}
+ 
+-	while (1) {
++	while (!force_quit) {
+ 		cur_tsc = rte_rdtsc();
+ 
+ 		/* TX queue buffer drain */
+@@ -842,6 +856,8 @@ main_loop(__attribute__((unused)) void *dummy)
+ 				process_pkts(qconf, pkts, nb_rx, portid);
+ 		}
+ 	}
++	printf("lcore_id #%d - Exit mainloop\n", lcore_id);
++	return 0;
+ }
+ 
+ static int32_t
+@@ -1644,7 +1660,7 @@ int32_t
+ main(int32_t argc, char **argv)
+ {
+ 	int32_t ret;
+-	uint32_t lcore_id;
++	uint32_t lcore_id, cdev_id;
+ 	uint8_t socket_id;
+ 	uint16_t portid, nb_ports;
+ 
+@@ -1731,12 +1747,30 @@ main(int32_t argc, char **argv)
+ 
+ 	check_all_ports_link_status(nb_ports, enabled_port_mask);
+ 
++	force_quit = false;
++	signal(SIGINT, signal_handler);
++	signal(SIGTERM, signal_handler);
++
+ 	/* launch per-lcore init on every lcore */
+ 	rte_eal_mp_remote_launch(main_loop, NULL, CALL_MASTER);
+ 	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
+ 		if (rte_eal_wait_lcore(lcore_id) < 0)
+ 			return -1;
+ 	}
+-
++	for (cdev_id = 0; cdev_id < rte_cryptodev_count(); cdev_id++) {
++		printf("Closing cryptodev %d...\n", cdev_id);
++		rte_cryptodev_stop(cdev_id);
++		rte_cryptodev_close(cdev_id);
++		printf(" Done\n");
++	}
++	for (portid = 0; portid < nb_ports; portid++) {
++		if ((enabled_port_mask & (1 << portid)) == 0)
++			continue;
++		printf("Closing port %d...\n", portid);
++		rte_eth_dev_stop(portid);
++		rte_eth_dev_close(portid);
++		printf(" Done\n");
++	}
++	printf("Bye...\n");
+ 	return 0;
+ }
+-- 
+2.7.4
+
