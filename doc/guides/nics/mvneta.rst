@@ -60,6 +60,12 @@ Features of the MVNETA PMD are:
 - Link status
 - CRC offload
 - Packet type parsing
+- MTU update
+- Jumbo frame
+- Promiscuous mode
+- Basic stats
+- Multicast MAC filter
+- Scattered TX frames
 
 
 Limitations
@@ -76,14 +82,14 @@ Prerequisites
 
   .. code-block:: console
 
-     git clone https://github.com/MarvellEmbeddedProcessors/linux-marvell.git -b linux-4.4.52-armada-17.10
+     git clone https://github.com/MarvellEmbeddedProcessors/linux-marvell.git -b linux-4.4.120-armada-18.09
 
 
 - MUSDK (Marvell User-Space SDK) sources
 
   .. code-block:: console
 
-      git clone git@github.com:Semihalf/marvell-dpdk.git -b musdk-armada-17.10-mvneta
+      git clone https://github.com/MarvellEmbeddedProcessors/musdk-marvell.git -b musdk-armada-18.09
 
   MUSDK is a light-weight library that provides direct access to Marvell's
   NETA. Alternatively prebuilt MUSDK library can be
@@ -157,7 +163,7 @@ MVNETA PMD requires extra out of tree kernel modules to function properly.
 
 .. code-block:: console
 
-   insmod musdk_uio.ko
+   insmod musdk_cma.ko
    insmod mv_neta_uio.ko
 
 Additionally interfaces used by DPDK application need to be put up:
