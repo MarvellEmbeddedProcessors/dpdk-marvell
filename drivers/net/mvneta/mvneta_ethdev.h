@@ -77,6 +77,7 @@ struct mvneta_priv {
 	uint16_t nb_rx_queues;
 
 	uint64_t rate_max;
+	struct rte_eth_stats prev_stats;
 };
 
 #endif /* _MVNETA_ETHDEV_H_ */
