@@ -161,7 +161,10 @@ static int mrvl_lcore_first;
 static int mrvl_lcore_last;
 static int mrvl_dev_num;
 
-static int mrvl_fill_bpool(struct mrvl_rxq *rxq, int num);
+static int mrvl_fill_bpool(struct mrvl_rxq *rxq, unsigned int core_id,
+			   uint16_t num);
+static inline int mrvl_buffs_alloc(struct mrvl_rxq *rxq, uint16_t *num);
+
 static inline void mrvl_free_sent_buffers(struct pp2_ppio *ppio,
 			struct pp2_hif *hif, unsigned int core_id,
 			struct mrvl_shadow_txq *sq, int qid, int force);
@@ -922,7 +925,8 @@ mrvl_dev_start(struct rte_eth_dev *dev)
 {
 	struct mrvl_priv *priv = dev->data->dev_private;
 	char match[MRVL_MATCH_LEN];
-	int ret = 0, i, def_init_size;
+	int ret = 0, i;
+	uint16_t def_init_size;
 
 	if (priv->ppio)
 		return mrvl_dev_set_link_up(dev);
@@ -944,10 +948,10 @@ mrvl_dev_start(struct rte_eth_dev *dev)
 	 */
 	def_init_size = priv->bpool_min_size + MRVL_BURST_SIZE * 2;
 	if (priv->bpool_init_size < def_init_size) {
-		int buffs_to_add = def_init_size - priv->bpool_init_size;
+		uint16_t buffs_to_add = def_init_size - priv->bpool_init_size;
 
 		priv->bpool_init_size += buffs_to_add;
-		ret = mrvl_fill_bpool(dev->data->rx_queues[0], buffs_to_add);
+		ret = mrvl_buffs_alloc(dev->data->rx_queues[0], &buffs_to_add);
 		if (ret)
 			RTE_LOG(ERR, PMD, "Failed to add buffers to bpool\n");
 	}
@@ -1661,18 +1665,15 @@ static void mrvl_txq_info_get(struct rte_eth_dev *dev, uint16_t tx_queue_id,
  *   0 on success, negative error value otherwise.
  */
 static int
-mrvl_fill_bpool(struct mrvl_rxq *rxq, int num)
+mrvl_fill_bpool(struct mrvl_rxq *rxq, unsigned int core_id,
+	uint16_t num)
 {
 	struct buff_release_entry entries[MRVL_PP2_TXD_MAX];
 	struct rte_mbuf *mbufs[MRVL_PP2_TXD_MAX];
 	int i, ret;
-	unsigned int core_id;
 	struct pp2_hif *hif;
 	struct pp2_bpool *bpool;
 
-	core_id = rte_lcore_id();
-	if (core_id == LCORE_ID_ANY)
-		core_id = 0;
 
 	hif = mrvl_get_hif(rxq->priv, core_id);
 	if (!hif)
@@ -1717,6 +1718,45 @@ out:
 		rte_pktmbuf_free(mbufs[i]);
 
 	return -1;
+}
+
+/**
+ * Allocate buffers from mempool
+ * and store addresses in rx descriptors.
+ *
+ * @return
+ *   0 on success, negative error value otherwise.
+ */
+static inline int
+mrvl_buffs_alloc(struct mrvl_rxq *rxq, uint16_t *num)
+{
+	uint16_t nb_desc, nb_desc_burst, sent = 0;
+	int ret = 0;
+	unsigned int core_id;
+
+	core_id = rte_lcore_id();
+	if (core_id == LCORE_ID_ANY)
+		core_id = 0;
+
+	nb_desc = *num;
+
+	do {
+		nb_desc_burst =
+			(nb_desc < MRVL_PP2_TXD_MAX) ?
+			nb_desc : MRVL_PP2_TXD_MAX;
+
+		ret = mrvl_fill_bpool(rxq, core_id, nb_desc_burst);
+		if (unlikely(ret))
+			break;
+
+		sent += nb_desc_burst;
+		nb_desc -= nb_desc_burst;
+
+	} while (nb_desc);
+
+	*num = sent;
+
+	return ret;
 }
 
 /**
@@ -1832,7 +1872,7 @@ mrvl_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 	priv->ppio_params.inqs_params.tcs_params[tc].inqs_params[inq].size =
 		desc;
 
-	ret = mrvl_fill_bpool(rxq, desc);
+	ret = mrvl_buffs_alloc(rxq, &desc);
 	if (ret) {
 		rte_free(rxq);
 		return ret;
@@ -2534,7 +2574,7 @@ mrvl_rx_pkt_burst(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 
 		if (unlikely(num <= q->priv->bpool_min_size ||
 			     (!rx_done && num < q->priv->bpool_init_size))) {
-			ret = mrvl_fill_bpool(q, MRVL_BURST_SIZE);
+			ret = mrvl_fill_bpool(q, core_id, MRVL_BURST_SIZE);
 			if (ret)
 				RTE_LOG(ERR, PMD, "Failed to fill bpool\n");
 		} else if (unlikely(num > q->priv->bpool_max_size)) {
