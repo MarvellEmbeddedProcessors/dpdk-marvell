@@ -1,0 +1,53 @@
+From 4e2fe11f3051e1bd204ecd466a3371236766093f Mon Sep 17 00:00:00 2001
+From: Natalie Samsonov <nsamsono@marvell.com>
+Date: Tue, 14 Aug 2018 22:10:23 +0300
+Subject: [PATCH 1/1] examples/l2fwd: tune params for a3k
+
+Creates executable with name: l2fwd-a3k
+
+Change-Id: I2d0991104da95cbb0daefa20edeaf75c36344438
+Signed-off-by: Natalie Samsonov <nsamsono@marvell.com>
+---
+ examples/l2fwd/Makefile | 2 +-
+ examples/l2fwd/main.c   | 6 +++---
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/examples/l2fwd/Makefile b/examples/l2fwd/Makefile
+index a8a47ad..18db75f 100644
+--- a/examples/l2fwd/Makefile
++++ b/examples/l2fwd/Makefile
+@@ -2,7 +2,7 @@
+ # Copyright(c) 2010-2014 Intel Corporation
+ 
+ # binary name
+-APP = l2fwd
++APP = l2fwd-3k
+ 
+ # all source are stored in SRCS-y
+ SRCS-y := main.c
+diff --git a/examples/l2fwd/main.c b/examples/l2fwd/main.c
+index e4a4a7c..f0cf9b8 100644
+--- a/examples/l2fwd/main.c
++++ b/examples/l2fwd/main.c
+@@ -46,15 +46,15 @@ static int mac_updating = 1;
+ 
+ #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
+ 
+-#define MAX_PKT_BURST 32
++#define MAX_PKT_BURST 20
+ #define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
+ #define MEMPOOL_CACHE_SIZE 256
+ 
+ /*
+  * Configurable number of RX/TX ring descriptors
+  */
+-#define RTE_TEST_RX_DESC_DEFAULT 1024
+-#define RTE_TEST_TX_DESC_DEFAULT 1024
++#define RTE_TEST_RX_DESC_DEFAULT 512
++#define RTE_TEST_TX_DESC_DEFAULT 512
+ static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
+ static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
+ 
+-- 
+2.7.4
+
