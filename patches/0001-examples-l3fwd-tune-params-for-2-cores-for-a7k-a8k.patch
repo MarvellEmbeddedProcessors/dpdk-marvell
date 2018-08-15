@@ -1,0 +1,57 @@
+From 6801a025cc7e9332cc7ed9ae5b2bd07d093fa3fc Mon Sep 17 00:00:00 2001
+From: Natalie Samsonov <nsamsono@marvell.com>
+Date: Tue, 14 Aug 2018 21:04:59 +0300
+Subject: [PATCH 1/1] examples/l3fwd: tune params for 2 cores for a7k/a8k
+
+Creates executable with name: l3fwd-a7_8k-c2
+
+Change-Id: Idc8285ea7e19145b78a886fcf26d6a9d038bdee9
+Signed-off-by: Natalie Samsonov <nsamsono@marvell.com>
+---
+ examples/l3fwd/Makefile | 2 +-
+ examples/l3fwd/l3fwd.h  | 2 +-
+ examples/l3fwd/main.c   | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/examples/l3fwd/Makefile b/examples/l3fwd/Makefile
+index cccdd9d..ac137e5 100644
+--- a/examples/l3fwd/Makefile
++++ b/examples/l3fwd/Makefile
+@@ -2,7 +2,7 @@
+ # Copyright(c) 2010-2016 Intel Corporation
+ 
+ # binary name
+-APP = l3fwd
++APP = l3fwd-a7_8k-c2
+ 
+ # all source are stored in SRCS-y
+ SRCS-y := main.c l3fwd_lpm.c l3fwd_em.c
+diff --git a/examples/l3fwd/l3fwd.h b/examples/l3fwd/l3fwd.h
+index c962dea..97531c1 100644
+--- a/examples/l3fwd/l3fwd.h
++++ b/examples/l3fwd/l3fwd.h
+@@ -15,7 +15,7 @@
+ #define NO_HASH_MULTI_LOOKUP 1
+ #endif
+ 
+-#define MAX_PKT_BURST     32
++#define MAX_PKT_BURST     128
+ #define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
+ 
+ #define MAX_RX_QUEUE_PER_LCORE 16
+diff --git a/examples/l3fwd/main.c b/examples/l3fwd/main.c
+index e7111fa..6fa5d6a 100644
+--- a/examples/l3fwd/main.c
++++ b/examples/l3fwd/main.c
+@@ -51,7 +51,7 @@
+  * Configurable number of RX/TX ring descriptors
+  */
+ #define RTE_TEST_RX_DESC_DEFAULT 1024
+-#define RTE_TEST_TX_DESC_DEFAULT 1024
++#define RTE_TEST_TX_DESC_DEFAULT 2048
+ 
+ #define MAX_TX_QUEUE_PER_PORT RTE_MAX_ETHPORTS
+ #define MAX_RX_QUEUE_PER_PORT 128
+-- 
+2.7.4
+
