@@ -118,14 +118,27 @@ The following options can be modified in the ``config`` file.
 
     Toggle compilation of the librte_pmd_mvneta driver.
 
+- ``CONFIG_RTE_LIBRTE_MVPP2_PMD`` (default ``n``)
+
+    Toggle compilation of the librte mvpp2 driver.
+
+    .. Note::
+
+       When MVNETA PMD is enabled ``CONFIG_RTE_LIBRTE_MVPP2_PMD`` must be disabled
+
+- ``CONFIG_RTE_LIBRTE_MVEP_COMMON`` (default ``n``)
+
+	Toggle compilation of the Marvell common utils.
+	Must be enabled for Marvell PMDs.
+
 
 Usage example
 ^^^^^^^^^^^^^
 
 .. code-block:: console
 
-   ./testpmd --vdev=eth_mvneta,iface=eth0,iface=eth1 \
-    -c 3 -- -i --p 3 -a
+   ./testpmd --vdev=net_mvneta,iface=eth0,iface=eth1 -c 3 -- \
+   --burst=20 --txd=512 --rxd=512 --rxq=1 --txq=1  --nb-cores=1 -i -a
 
 
 Building DPDK
@@ -137,7 +150,7 @@ Driver needs precompiled MUSDK library during compilation.
 
    export CROSS_COMPILE=<toolchain>/bin/aarch64-linux-gnu-
    ./bootstrap
-   ./configure --host=aarch64-linux-gnu --enable-bpool-dma=64
+   ./configure --enable-pp2=no --enable-neta --enable-dma-addr=64  --host=aarch64-linux-gnu
    make install
 
 MUSDK will be installed to `usr/local` under current directory.
@@ -151,7 +164,9 @@ the path to the MUSDK installation directory needs to be exported.
    export LIBMUSDK_PATH=<musdk>/usr/local
    export CROSS=aarch64-linux-gnu-
    make config T=arm64-armv8a-linuxapp-gcc
-   sed -ri 's,(MVNETA_PMD=)n,\1y,' build/.config
+   sed -i "s/MVNETA_PMD=n/MVNETA_PMD=y/" build/.config
+   sed -i "s/MVPP2_PMD=y/MVPP2_PMD=n/" build/.config
+   sed -i "s/MVEP_COMMON=n/MVEP_COMMON=y/" build/.config
    make
 
 Usage Example
@@ -177,8 +192,8 @@ In order to run testpmd example application following command can be used:
 
 .. code-block:: console
 
-   ./testpmd --vdev=eth_mvneta,iface=eth0,iface=eth1 -c 3 -- \
-     -i --p 3 -a --txd 256 --rxd 128 --rxq=1 --txq=1  --nb-cores=1
+   ./testpmd --vdev=net_mvneta,iface=eth0,iface=eth1 -c 3 -- \
+   --burst=20 --txd=512 --rxd=512 --rxq=1 --txq=1  --nb-cores=1 -i -a
 
 
 In order to run l2fwd example application following command can be used:
