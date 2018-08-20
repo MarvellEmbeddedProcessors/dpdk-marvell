@@ -102,13 +102,18 @@ MVSAM CRYPTO PMD driver compilation is disabled by default due to external depen
 Currently there are two driver specific compilation options in
 ``config/common_base`` available:
 
-- ``CONFIG_RTE_LIBRTE_PMD_MVSAM_CRYPTO`` (default: ``y``)
+- ``CONFIG_RTE_LIBRTE_PMD_MVSAM_CRYPTO`` (default: ``n``)
 
     Toggle compilation of the librte_crypto_mvsam_pmd driver.
 
 - ``CONFIG_RTE_LIBRTE_PMD_MVSAM_CRYPTO_DEBUG`` (default: ``n``)
 
     Toggle display of debugging messages.
+
+- ``CONFIG_RTE_LIBRTE_MVEP_COMMON`` (default ``n``)
+
+	Toggle compilation of the Marvell common utils.
+	Must be enabled for Marvell PMDs.
 
 MVSAM CRYPTO PMD requires MUSDK built with EIP197 support thus following
 extra option must be passed to the library configuration script:
