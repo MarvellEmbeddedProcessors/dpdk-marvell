@@ -1,7 +1,7 @@
-From 7d61a2f3547a0a7b59bc035643f0439dfcc4628d Mon Sep 17 00:00:00 2001
+From b39f28604afd0fefadd26ee8a09db384b61eee46 Mon Sep 17 00:00:00 2001
 From: Dmitri Epshtein <dima@marvell.com>
 Date: Mon, 19 Mar 2018 17:09:03 +0200
-Subject: [PATCH 3/5] examples/ipsec-secgw: create LPM only if needed
+Subject: [PATCH 3/3] examples/ipsec-secgw: create LPM only if needed
 
 IPv4 LPM created only if there are IPv4 entries in configuration file
 IPv6 LPM created only if there are IPv6 entries in configuration file

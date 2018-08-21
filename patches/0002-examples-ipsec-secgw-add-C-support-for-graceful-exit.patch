@@ -1,7 +1,7 @@
-From 982005f50949393a93b2f9da97db99d972bd391c Mon Sep 17 00:00:00 2001
+From f27e7f12d0892ad71f6ca3bd41fb60266c7e48b5 Mon Sep 17 00:00:00 2001
 From: Dmitri Epshtein <dima@marvell.com>
 Date: Mon, 19 Mar 2018 18:51:25 +0200
-Subject: [PATCH 2/5] examples/ipsec-secgw: add ^C support for graceful exit
+Subject: [PATCH 2/3] examples/ipsec-secgw: add ^C support for graceful exit
 
 - stop and close all ports
 - stop and close all crypto devices
@@ -15,9 +15,23 @@ Reviewed-on: http://vgitil04.il.marvell.com:8080/52329
 Tested-by: iSoC Platform CI <ykjenk@marvell.com>
 Reviewed-by: Yelena Krivosheev <yelena@marvell.com>
 ---
+ examples/ipsec-secgw/Makefile      |  2 +-
  examples/ipsec-secgw/ipsec-secgw.c | 40 +++++++++++++++++++++++++++++++++++---
- 1 file changed, 37 insertions(+), 3 deletions(-)
+ 2 files changed, 38 insertions(+), 4 deletions(-)
 
+diff --git a/examples/ipsec-secgw/Makefile b/examples/ipsec-secgw/Makefile
+index 02d41e3..93589a8 100644
+--- a/examples/ipsec-secgw/Makefile
++++ b/examples/ipsec-secgw/Makefile
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: BSD-3-Clause
+ # Copyright(c) 2016 Intel Corporation
+ 
+-APP = ipsec-secgw
++APP = mv-ipsec-secgw
+ 
+ #
+ # all source are stored in SRCS-y
 diff --git a/examples/ipsec-secgw/ipsec-secgw.c b/examples/ipsec-secgw/ipsec-secgw.c
 index 3a8562e..bed784c 100644
 --- a/examples/ipsec-secgw/ipsec-secgw.c
