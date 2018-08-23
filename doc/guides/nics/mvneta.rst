@@ -53,17 +53,17 @@ Features
 
 Features of the MVNETA PMD are:
 
-- Start/stop
-- tx/rx_queue_setup
-- tx/rx_burst
 - Speed capabilities
 - Link status
-- CRC offload
-- Packet type parsing
 - MTU update
 - Jumbo frame
 - Promiscuous mode
+- CRC offload
+- L3 checksum offload
+- L4 checksum offload
+- Packet type parsing
 - Basic stats
+- Unicast MAC filter
 - Multicast MAC filter
 - Scattered TX frames
 
@@ -74,6 +74,11 @@ Limitations
 - Flushing vlans added for filtering is not possible due to MUSDK missing
   functionality. Current workaround is to reset board so that NETA has a
   chance to start in a sane state.
+
+- MUSDK architecture does not support changing configuration in run time.
+  All nessesary configurations should be done before first dev_start().
+
+- Running more than one DPDK-MUSDK application simultaneously is not supported.
 
 Prerequisites
 -------------
@@ -173,7 +178,7 @@ Usage Example
 -------------
 
 MVNETA PMD requires extra out of tree kernel modules to function properly.
-`musdk_uio` and `mv_neta_uio` sources are part of the MUSDK. Please consult
+`musdk_cma` and `mv_neta_uio` sources are part of the MUSDK. Please consult
 ``doc/musdk_get_started.txt`` for the detailed build instructions.
 
 .. code-block:: console
@@ -201,3 +206,9 @@ In order to run l2fwd example application following command can be used:
 .. code-block:: console
 
    ./l2fwd --vdev=eth_mvneta,iface=eth0,iface=eth1 -c 3 -- -T 1 -p 3
+
+In order to run l2fwd example application following command can be used:
+
+.. code-block:: console
+
+   ./l3fwd --vdev=eth_mvneta,iface=eth0,iface=eth1 -c 2 -- -P -p 3 -L --config="(0,0,1),(1,0,1)"
