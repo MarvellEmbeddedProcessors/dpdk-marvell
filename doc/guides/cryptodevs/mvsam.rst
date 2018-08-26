@@ -37,6 +37,13 @@ support by utilizing MUSDK library, which provides cryptographic operations
 acceleration by using Security Acceleration Engine (EIP197) directly from
 user-space with minimum overhead and high performance.
 
+Detailed information about SoCs that use MVSAM crypto driver can be obtained here:
+
+* https://www.marvell.com/embedded-processors/armada-70xx/
+* https://www.marvell.com/embedded-processors/armada-80xx/
+* https://www.marvell.com/embedded-processors/armada-3700/
+
+
 Features
 --------
 
@@ -44,11 +51,12 @@ MVSAM CRYPTO PMD has support for:
 
 Features:
 
-* Symmetric crypto
-* Sym operation chaining
-* HW accelerated
-* OOP SGL In LB Out
-* OOP LB In LB Out
+* Symmetric crypto operations: encryption/description and authentication
+* Symmetric chaining crypto operations
+* HW Accelerated using EIP97/EIP197b/EIP197d
+* Out-of-place Scatter-gather list Input, Linear Buffers Output
+* Out-of-place Linear Buffers Input, Linear Buffers Output
+
 
 Cipher algorithms:
 
@@ -133,7 +141,7 @@ loaded:
 
 .. code-block:: console
 
-   insmod musdk_uio.ko
+   insmod musdk_cma.ko
    insmod mvpp2x_sysfs.ko
    insmod crypto_safexcel.ko rings=0,0
    insmod mv_sam_uio.ko
